@@ -2,7 +2,7 @@
 
 A web-based management and monitoring tool for Pokemon GO devices with MITM and PlayIntegrityFix support.
 
-![Rotomina Dashboard](https://via.placeholder.com/800x450.png?text=Rotomina+Dashboard)
+![Rotomina Dashboard](screenshots/dashboard.png)
 
 ## Features
 
