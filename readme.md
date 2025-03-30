@@ -31,7 +31,7 @@ The easiest way to run Rotomina is using Docker Compose with the pre-built image
 
 1. Download only the standalone docker-compose.yml file:
 ```bash
-curl -O https://raw.githubusercontent.com/DEIN_GITHUB_USERNAME/rotomina/main/standalone-docker-compose.yml
+curl -O https://raw.githubusercontent.com/f3ger/rotomina/main/standalone-docker-compose.yml
 mv standalone-docker-compose.yml docker-compose.yml
 ```
 
@@ -67,7 +67,7 @@ docker run -d \
   -v $(pwd)/config.json:/app/config.json \
   -v $(pwd)/data:/app/data \
   --privileged \
-  ghcr.io/DEIN_GITHUB_USERNAME/rotomina:latest
+  ghcr.io/f3ger/rotomina:latest
 ```
 
 #### Building from Source
@@ -76,7 +76,7 @@ If you prefer to build from source:
 
 ```bash
 # Clone the repository
-git clone https://github.com/DEIN_GITHUB_USERNAME/rotomina.git
+git clone https://github.com/f3ger/rotomina.git
 cd rotomina
 
 # Build and run with Docker Compose
@@ -90,7 +90,7 @@ If you prefer a manual installation without Docker:
 
 ```bash
 # Clone the repository
-git clone https://github.com/DEIN_GITHUB_USERNAME/rotomina.git
+git clone https://github.com/f3ger/rotomina.git
 cd rotomina
 
 # Install requirements
