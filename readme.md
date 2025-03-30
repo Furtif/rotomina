@@ -1,6 +1,6 @@
 # Rotomina
 
-A web-based management and monitoring tool for Pokemon GO devices with MITM and PlayIntegrityFix support.
+A web-based management and monitoring tool for Android devices with MITM and PlayIntegrityFix support.
 
 ![Rotomina Dashboard](screenshots/dashboard.png)
 
