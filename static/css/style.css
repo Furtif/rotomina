@@ -1,0 +1,144 @@
+:root {
+    --primary: #3694FF;    /* Blau-Akzent */
+    --secondary: #1A1A1A;  /* Dunkler Hintergrund */
+    --accent: #E9C46A;     /* Gold für Highlights */
+    --text: #E0E0E0;       /* Heller Text */
+    --border: #404040;     /* Grenzlinien */
+}
+
+body {
+    background: var(--secondary);
+    color: var(--text);
+    font-family: 'Roboto', Arial, sans-serif;
+    line-height: 1.6;
+    margin: 0;
+    min-height: 100vh;
+}
+
+nav {
+    background: #111;
+    padding: 1.5rem 2rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+nav a {
+    color: var(--text) !important;
+    margin: 0 1rem;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+nav a:hover {
+    background: rgba(255,255,255,0.05);
+    text-decoration: none;
+    transform: translateY(-2px);
+}
+
+.content {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+}
+
+/* Formulare */
+input[type="text"], 
+input[type="password"] {
+    width: 100%;
+    padding: 0.8rem;
+    background: #2A2A2A;
+    border: 2px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    margin: 0.5rem 0 1.5rem;
+    transition: border-color 0.3s;
+}
+
+input:focus {
+    border-color: var(--primary);
+    outline: none;
+}
+
+button {
+    background: var(--primary);
+    color: white;
+    padding: 0.8rem 2rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+button:hover {
+    background: #256dbe;
+    transform: translateY(-2px);
+}
+
+/* Tabellen */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #1A1A1A;
+    border-radius: 8px;
+    overflow: hidden;
+    margin: 1.5rem 0;
+}
+
+th {
+    background: #111;
+    color: var(--primary);
+    white-space: nowrap;
+    padding: 1rem 1.5rem !important;
+    text-align: left;
+}
+
+td {
+    padding: 0.8rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+}
+
+td:nth-child(7) {
+    font-weight: 500;
+}
+td:nth-child(7):contains("°C") {
+    color: var(--accent);
+}
+
+tr:hover {
+    background: rgba(255,255,255,0.02);
+}
+
+/* Fehlermeldungen */
+.error {
+    background: #4A1A1A;
+    color: #FF6B6B;
+    padding: 1rem;
+    border-radius: 6px;
+    margin: 1rem 0;
+    border: 1px solid #FF6B6B;
+}
+
+.low-memory {
+    background-color: #fff3e0;
+    color: #ef6c00;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    nav {
+        padding: 1rem;
+        text-align: center;
+    }
+    
+    nav a {
+        display: block;
+        margin: 0.5rem 0;
+    }
+    
+    table {
+        font-size: 0.9rem;
+    }
+}

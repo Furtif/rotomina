@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rotomina - Status</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.3.min.js"></script>
+    
+    <style>
+        /* Improved dark color palette */
+        :root {
+            --bs-body-bg: #0f0f0f;               /* Darker base background */
+            --bs-body-color: #e0e0e0;            /* Text color */
+            --bs-card-bg: #1a1a1a;               /* Lighter card color */
+            --bs-card-border-color: #2c2c2c;     /* Subtle card borders */
+            --bs-table-bg: #1a1a1a;              /* Table background */
+            --bs-table-color: #e0e0e0;           /* Table text color */
+            --bs-table-striped-bg: #242424;      /* Slightly lighter stripes */
+            --bs-table-striped-color: #e0e0e0;   /* Stripe text color */
+            --bs-modal-bg: #1a1a1a;              /* Modal background */
+            --bs-modal-color: #e0e0e0;           /* Modal text color */
+            --bs-border-color: #333;             /* Border color for tables */
+            --bs-secondary-bg: #242424;          /* Secondary background */
+            --bs-btn-bg: #2d2d2d;                /* Standard button background */
+            --bs-btn-hover-bg: #3a3a3a;          /* Hover background for buttons */
+        }
+        
+        body {
+            background-color: var(--bs-body-bg);
+            color: var(--bs-body-color);
+        }
+        
+        /* Card styling */
+        .card {
+            background-color: var(--bs-card-bg);
+            border-color: var(--bs-card-border-color);
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+            margin-bottom: 1.5rem;
+        }
+        
+        .card-header {
+            background-color: rgba(0, 0, 0, 0.15);
+            border-bottom: 1px solid var(--bs-card-border-color);
+            padding: 1rem 1.25rem;
+        }
+        
+        /* Table styling */
+        .table {
+            color: var(--bs-table-color);
+            border-color: var(--bs-border-color);
+        }
+        
+        .table-striped > tbody > tr:nth-of-type(odd) {
+            background-color: var(--bs-table-bg);
+        }
+        
+        .table-striped > tbody > tr:nth-of-type(even) {
+            background-color: var(--bs-table-striped-bg);
+        }
+        
+        .table td, .table th {
+            border-color: var(--bs-border-color);
+            padding: 0.75rem;
+            vertical-align: middle;
+        }
+        
+        /* Improved table separators */
+        .table-striped {
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+        
+        .table-striped thead th {
+            background-color: rgba(0, 0, 0, 0.2);
+            border-bottom: 2px solid var(--bs-border-color);
+            color: #fff;
+        }
+        
+        /* Button styling */
+        .btn-outline-primary {
+            color: #6ea8fe;
+            background-color: var(--bs-btn-bg);
+            border-color: #6ea8fe;
+        }
+        
+        .btn-outline-primary:hover {
+            color: #fff;
+            background-color: #0d6efd;
+            border-color: #0d6efd;
+        }
+        
+        .btn-primary {
+            background-color: #0d6efd;
+            border-color: #0a58ca;
+        }
+        
+        .btn-secondary {
+            background-color: var(--bs-btn-bg);
+            border-color: #565e64;
+        }
+        
+        .btn-secondary:hover {
+            background-color: var(--bs-btn-hover-bg);
+        }
+        
+        /* Status badges */
+        .badge {
+            padding: 0.4em 0.65em;
+            font-weight: 500;
+            border-radius: 4px;
+        }
+        
+        /* Dropdown menu styling */
+        .dropdown-menu {
+            background-color: #2a2a2a;
+            border-color: #444;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+            padding: 0.5rem 0;
+        }
+        
+        .dropdown-item {
+            color: #e0e0e0;
+        }
+        
+        .dropdown-item:hover {
+            background-color: #3a3a3a;
+            color: #fff;
+        }
+        
+        /* Form element styling */
+        .form-control {
+            background-color: #2a2a2a;
+            border-color: #444;
+            color: #e0e0e0;
+        }
+        
+        .form-control:focus {
+            background-color: #2a2a2a;
+            color: #e0e0e0;
+            border-color: #0d6efd;
+            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+        }
+        
+        .form-check-input {
+            background-color: #2a2a2a;
+            border-color: #444;
+        }
+        
+        .form-check-input:checked {
+            background-color: #0d6efd;
+            border-color: #0d6efd;
+        }
+        
+        /* Modal styling */
+        .modal-content {
+            background-color: var(--bs-modal-bg);
+            color: var(--bs-modal-color);
+            border: 1px solid #444;
+        }
+        
+        .modal-header {
+            border-bottom: 1px solid #444;
+        }
+        
+        .modal-footer {
+            border-top: 1px solid #444;
+        }
+        
+        /* Navbar styling */
+        .navbar-dark.bg-dark {
+            background-color: #131313 !important; /* Darker than the main background */
+        }
+        
+        /* Auto-refresh indicator */
+        #refreshIndicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-left: 8px;
+            background-color: #28a745;
+            animation: pulse 2s infinite;
+        }
+        
+        /* Enhanced pulse effect */
+        @keyframes pulse {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7);
+                opacity: 1;
+            }
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 6px rgba(40, 167, 69, 0);
+                opacity: 0.7;
+            }
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
+                opacity: 1;
+            }
+        }
+        
+        /* Improved text readability */
+        .text-muted {
+            color: #9e9e9e !important;
+        }
+        
+        /* Additional hover effects for rows */
+        .table-striped > tbody > tr:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        
+        /* New refresh button styles */
+        .bg-success-light {
+            background-color: rgba(40, 167, 69, 0.2) !important;
+            transition: background-color 0.5s ease;
+        }
+        
+        .refresh-icon {
+            display: inline-block;
+            font-style: normal;
+            font-weight: bold;
+            font-size: 16px;
+        }
+        
+        .spinning {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Auto-update status labels */
+        .auto-update-status {
+            display: inline-block;
+            font-size: 0.8rem;
+            margin-left: 8px;
+            padding: 3px 8px;
+            border-radius: 12px;
+        }
+        
+        .auto-update-enabled {
+            background-color: rgba(40, 167, 69, 0.2);
+            color: #2ECC71;
+            border: 1px solid #2ECC71;
+        }
+        
+        .auto-update-disabled {
+            background-color: rgba(231, 76, 60, 0.2);
+            color: #E74C3C;
+            border: 1px solid #E74C3C;
+        }
+        
+        /* ADB Error Tooltip und Badge Styling */
+        .adb-status {
+            position: relative;
+            cursor: help;
+        }
+        
+        .adb-status .status-tooltip {
+            visibility: hidden;
+            width: 250px;
+            background-color: #1e1e1e;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 8px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -125px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+            font-size: 12px;
+            pointer-events: none;
+        }
+        
+        .adb-status .status-tooltip::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #1e1e1e transparent transparent transparent;
+        }
+        
+        .adb-status:hover .status-tooltip {
+            visibility: visible;
+            opacity: 1;
+        }
+        
+        .adb-error-badge {
+            font-size: 10px;
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            padding: 3px 6px;
+            border-radius: 50%;
+            background-color: #dc3545;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        /* WebSocket connection status */
+        #websocketStatus {
+            font-size: 0.8rem;
+            padding: 2px 8px;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+        }
+        
+        #websocketStatus.connected {
+            background-color: rgba(40, 167, 69, 0.2);
+            color: #2ECC71;
+        }
+        
+        #websocketStatus.disconnected {
+            background-color: rgba(231, 76, 60, 0.2);
+            color: #E74C3C;
+        }
+        
+        #websocketStatus.connecting {
+            background-color: rgba(243, 156, 18, 0.2);
+            color: #F39C12;
+        }
+
+        /* Sortable table styling */
+        .sortable {
+            cursor: pointer;
+            position: relative;
+            user-select: none;
+        }
+        
+        .sortable:hover {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+        
+        .sort-icon {
+            display: inline-block;
+            width: 0;
+            height: 0;
+            margin-left: 8px;
+            vertical-align: middle;
+            content: "";
+            border: 4px solid transparent;
+        }
+        
+        .sortable.asc .sort-icon {
+            border-bottom: 4px solid #fff;
+            border-top: none;
+        }
+        
+        .sortable.desc .sort-icon {
+            border-top: 4px solid #fff;
+            border-bottom: none;
+        }
+        
+        /* Table row hover effect */
+        #deviceTable tbody tr {
+            transition: background-color 0.2s ease;
+        }
+        
+        #deviceTable tbody tr:hover {
+            background-color: rgba(255, 255, 255, 0.08) !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#">Rotomina</a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav">
+                        <li class="nav-item">
+                            <a class="nav-link active" href="/status">Status</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/settings">Settings</a>
+                        </li>
+                    </ul>
+                    <ul class="navbar-nav ms-auto">
+                        <li class="nav-item">
+                            <span class="nav-link">Logged in as: {{ username }}</span>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="/logout">Logout</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">
+                            Device Overview
+                            <span id="refreshIndicator" title="WebSocket status"></span>
+                            <span id="websocketStatus" class="connecting">Connecting...</span>
+                            <small class="text-muted ms-2" id="lastUpdated"></small>
+                        </h5>
+                        <div>
+                            <form method="post" action="/pogo/update" style="display: inline-block;">
+                                <button type="submit" class="btn btn-primary" id="updateButton">
+                                    PoGo Update All ({{ pogo_latest }})
+                                    <span id="pogoAutoStatus" class="auto-update-status {% if config.pogo_auto_update_enabled %}auto-update-enabled{% else %}auto-update-disabled{% endif %}">
+                                        Auto: {% if config.pogo_auto_update_enabled %}ON{% else %}OFF{% endif %}
+                                    </span>
+                                </button>
+                            </form>
+                            <button type="button" class="btn btn-secondary ms-2" id="refreshBtn">Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="row mb-2">
+                            <div class="col-12">
+                                <div class="d-flex justify-content-end align-items-center">
+                                    <div class="me-4">
+                                        <span class="badge rounded-pill {% if config.pif_auto_update_enabled %}bg-success{% else %}bg-danger{% endif %} me-2">
+                                            PIF Updates: {% if config.pif_auto_update_enabled %}Automatic{% else %}Manual{% endif %}
+                                        </span>
+                                        <span class="badge rounded-pill {% if config.pogo_auto_update_enabled %}bg-success{% else %}bg-danger{% endif %}">
+                                            PoGO Updates: {% if config.pogo_auto_update_enabled %}Automatic{% else %}Manual{% endif %}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-striped" id="deviceTable">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable" data-sort="text">Name <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="text">IP <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="status">ADB <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="status">Alive <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="status">Control <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="version">PoGo <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="version">MITM <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="version">PIF <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="memory">Memory <span class="sort-icon"></span></th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for device in devices %}
+                                    <tr data-device-ip="{{ device.ip }}">
+                                        <td>{{ device.display_name }}</td>
+                                        <td>{{ device.ip }}</td>
+                                        <td>
+                                            <div class="adb-status">
+                                                {% if device.status %}
+                                                    <span class="text-success">✅</span>
+                                                {% else %}
+                                                    <span class="text-danger position-relative">
+                                                        ❌
+                                                        {% if device.adb_error %}
+                                                            <span class="adb-error-badge">!</span>
+                                                        {% endif %}
+                                                    </span>
+                                                    {% if device.adb_error %}
+                                                        <span class="status-tooltip">
+                                                            {{ device.adb_error }}
+                                                        </span>
+                                                    {% endif %}
+                                                {% endif %}
+                                            </div>
+                                        </td>
+                                        <td class="is-alive">{{ device.is_alive|safe }}</td>
+                                        <td>
+                                            {% if device.control_enabled %}
+                                            <span class="badge bg-success">Active</span>
+                                            {% else %}
+                                            <span class="badge bg-secondary">Inactive</span>
+                                            {% endif %}
+                                        </td>
+                                        <td class="pogo-version">{{ device.pogo }}</td>
+                                        <td class="mitm-version">{{ device.mitm }}</td>
+                                        <td class="module-version">{{ device.module }}</td>
+                                        <td class="device-memory">{{ device.mem_free|format_memory }}</td>
+                                        <td>
+                                            <div class="btn-group me-2">
+                                                <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                                    PoGo Version
+                                                </button>
+                                                <ul class="dropdown-menu dropdown-menu-dark">
+                                                    <li>
+                                                        <form method="post" action="/pogo/device-update">
+                                                            <input type="hidden" name="device_ip" value="{{ device.ip }}:5555">
+                                                            <input type="hidden" name="version" value="{{ pogo_latest }}">
+                                                            <button type="submit" class="dropdown-item">{{ pogo_latest }}</button>
+                                                        </form>
+                                                    </li>
+                                                    <li>
+                                                        <form method="post" action="/pogo/device-update">
+                                                            <input type="hidden" name="device_ip" value="{{ device.ip }}:5555">
+                                                            <input type="hidden" name="version" value="{{ pogo_previous }}">
+                                                            <button type="submit" class="dropdown-item">{{ pogo_previous }}</button>
+                                                        </form>
+                                                    </li>
+                                                </ul>
+                                            </div>
+                                            <div class="btn-group me-2">
+                                                <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                                    PIF Version
+                                                </button>
+                                                <ul class="dropdown-menu dropdown-menu-dark pif-versions-dropdown" data-device-ip="{{ device.ip }}:5555">
+                                                    <li><div class="dropdown-item text-center">Loading versions...</div></li>
+                                                </ul>
+                                            </div>
+                                            <button class="btn btn-sm btn-outline-secondary refresh-device-button" 
+                                                   onclick="refreshDeviceData('{{ device.ip }}')" title="Refresh version data">
+                                                <i id="refresh-{{ device.ip }}" class="refresh-icon">↻</i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal for update status -->
+    <div class="modal fade" id="updateModal" tabindex="-1" aria-labelledby="updateModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="updateModalLabel">Update in progress...</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="progress">
+                        <div id="updateProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <p id="updateMessage" class="mt-2 text-center">Please wait...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let reconnectInterval;
+        let isConnected = false;
+        let updateModal;
+
+        $(document).ready(function() {
+            updateModal = new bootstrap.Modal(document.getElementById('updateModal'));
+            
+            // Set last updated time
+            updateLastUpdatedTime();
+            
+            // Initialize WebSocket connection
+            setupWebSocket();
+            
+            // Refresh button - send WebSocket refresh command
+            $("#refreshBtn").click(function() {
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send("refresh");
+                    console.log("Sent refresh command via WebSocket");
+                } else {
+                    console.log("WebSocket not connected, attempting to reconnect");
+                    setupWebSocket();
+                }
+            });
+
+            // Update button click
+            $("#updateButton").click(function() {
+                updateModal.show();
+            });
+
+            // Individual device update buttons
+            $(".dropdown-item").click(function() {
+                updateModal.show();
+            });
+        });
+
+        function updateLastUpdatedTime() {
+            const now = new Date();
+            $("#lastUpdated").text(`Last updated: ${now.toLocaleTimeString()}`);
+        }
+
+        // Format memory for display
+        function formatMemory(memKB) {
+            if (!memKB || memKB <= 0) {
+                return "N/A";
+            }
+            
+            // Memory comes in KB
+            if (memKB < 1024) {
+                return `${memKB.toFixed(1).replace('.', ',')} kB`;
+            }
+            
+            // Convert to MB
+            const memMB = memKB / 1024;
+            if (memMB < 1024) {
+                return `${memMB.toFixed(2).replace('.', ',')} MB`;
+            }
+            
+            // Convert to GB
+            const memGB = memMB / 1024;
+            return `${memGB.toFixed(2).replace('.', ',')} GB`;
+        }
+
+        function setupWebSocket() {
+            // Determine WebSocket URL based on the current HTTP URL
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/status`;
+            
+            // Update WebSocket status indicator
+            $("#websocketStatus").removeClass("connected disconnected").addClass("connecting").text("Connecting...");
+            
+            // Create WebSocket connection
+            socket = new WebSocket(wsUrl);
+            
+            socket.onopen = function(event) {
+                console.log("WebSocket connection established");
+                isConnected = true;
+                
+                // Update connection indicator
+                $("#refreshIndicator").css('background-color', '#28a745');
+                $("#websocketStatus").removeClass("connecting disconnected").addClass("connected").text("Connected");
+                
+                // Clear any existing reconnect interval
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval);
+                    reconnectInterval = null;
+                }
+            };
+            
+            socket.onmessage = function(event) {
+                // Parse JSON data from server
+                const data = JSON.parse(event.data);
+                
+                // Update device table with new data
+                updateDeviceTable(data);
+                
+                // Update time of last update
+                updateLastUpdatedTime();
+                
+                // Update auto-update status indicators
+                updateAutoUpdateStatus(data.pif_auto_update_enabled, data.pogo_auto_update_enabled);
+                
+                // Check for update progress info
+                if (data.update_in_progress) {
+                    showUpdateProgress(data.update_progress);
+                } else if (updateModal._isShown) {
+                    // If update is complete, hide modal after a delay
+                    setTimeout(() => {
+                        updateModal.hide();
+                    }, 1000);
+                }
+            };
+            
+            socket.onclose = function(event) {
+                console.log("WebSocket connection closed");
+                isConnected = false;
+                
+                // Update connection indicator
+                $("#refreshIndicator").css('background-color', '#dc3545');
+                $("#websocketStatus").removeClass("connected connecting").addClass("disconnected").text("Disconnected");
+                
+                // Set up reconnection
+                if (!reconnectInterval) {
+                    reconnectInterval = setInterval(function() {
+                        if (!isConnected) {
+                            console.log("Attempting to reconnect WebSocket...");
+                            setupWebSocket();
+                        }
+                    }, 5000); // Try to reconnect every 5 seconds
+                }
+            };
+            
+            socket.onerror = function(event) {
+                console.error("WebSocket error:", event);
+                $("#websocketStatus").removeClass("connected connecting").addClass("disconnected").text("Error");
+
+                // If not already in fallback mode, switch to AJAX polling
+                if (!webSocketFailed) {
+                    webSocketFailed = true;
+                    startAjaxPolling();
+                }
+            };
+
+            // Prüfen, ob WebSockets funktionieren, sonst auf AJAX-Polling umschalten
+            let webSocketFailed = false;
+
+            // Timeout: Wenn nach 3 Sekunden die WebSocket-Verbindung nicht hergestellt ist, 
+            // auf AJAX-Polling umschalten
+            setTimeout(function() {
+                if (!isConnected && !webSocketFailed) {
+                    console.log("WebSocket connection timed out, switching to AJAX polling");
+                    webSocketFailed = true;
+                    $("#websocketStatus").removeClass("connected connecting").addClass("disconnected").text("Using AJAX");
+                    
+                    // Start AJAX polling as fallback
+                    startAjaxPolling();
+                }
+            }, 3000);
+        }
+        
+        // AJAX polling function (old method as backup)
+        function startAjaxPolling() {
+            console.log("Starting AJAX polling instead of WebSockets");
+            
+            // Initial data fetch
+            refreshDataViaAjax();
+            
+            // Set up regular polling interval (every 30 seconds)
+            setInterval(refreshDataViaAjax, 30000);
+        }
+
+        function refreshDataViaAjax() {
+            $.ajax({
+                url: "/api/status",
+                type: "GET",
+                dataType: "json",
+                success: function(data) {
+                    // Use the same update function as WebSocket
+                    updateDeviceTable(data);
+                    updateLastUpdatedTime();
+                    updateAutoUpdateStatus(data.pif_auto_update_enabled, data.pogo_auto_update_enabled);
+                    
+                    // Check for update progress
+                    if (data.update_in_progress) {
+                        showUpdateProgress(data.update_progress);
+                    }
+                },
+                error: function() {
+                    console.error("Error refreshing data via AJAX");
+                }
+            });
+        }
+        
+        // Show update progress in modal
+        function showUpdateProgress(progress) {
+            if (!updateModal._isShown) {
+                updateModal.show();
+            }
+            
+            $("#updateProgress").css("width", progress + "%");
+            $("#updateMessage").text("Installation in progress...");
+        }
+        
+        // Update auto-update status indicators
+        function updateAutoUpdateStatus(pifEnabled, pogoEnabled) {
+            // Update PIF status badge
+            const pifBadge = $(".badge:contains('PIF Updates')");
+            pifBadge.removeClass("bg-success bg-danger")
+                    .addClass(pifEnabled ? "bg-success" : "bg-danger")
+                    .html(`PIF Updates: ${pifEnabled ? "Automatic" : "Manual"}`);
+            
+            // Update PoGO status badge
+            const pogoBadge = $(".badge:contains('PoGO Updates')");
+            pogoBadge.removeClass("bg-success bg-danger")
+                    .addClass(pogoEnabled ? "bg-success" : "bg-danger")
+                    .html(`PoGO Updates: ${pogoEnabled ? "Automatic" : "Manual"}`);
+            
+            // Update PoGO button label
+            const pogoAutoStatus = $("#pogoAutoStatus");
+            pogoAutoStatus.removeClass("auto-update-enabled auto-update-disabled")
+                          .addClass(pogoEnabled ? "auto-update-enabled" : "auto-update-disabled")
+                          .html(`Auto: ${pogoEnabled ? "ON" : "OFF"}`);
+        }
+        
+        // Refresh single device data
+        function refreshDeviceData(deviceIp) {
+            const refreshIcon = $(`#refresh-${deviceIp}`);
+            refreshIcon.addClass('spinning');
+            
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                // Send specific device refresh command via WebSocket
+                socket.send(`refresh_device:${deviceIp}`);
+                console.log(`Sent refresh command for ${deviceIp} via WebSocket`);
+                
+                // Keep spinning for a moment to show activity
+                setTimeout(() => {
+                    refreshIcon.removeClass('spinning');
+                }, 1000);
+            } else {
+                // Fallback to HTTP if WebSocket not available
+                $.ajax({
+                    url: `/clear-cache?device_ip=${deviceIp}`,
+                    type: "POST",
+                    dataType: "json",
+                    success: function(data) {
+                        setTimeout(() => {
+                            // After clearing cache, refresh the data
+                            if (socket && socket.readyState === WebSocket.OPEN) {
+                                socket.send("refresh");
+                            } else {
+                                // Fallback to location reload if WebSocket unavailable
+                                window.location.reload();
+                            }
+                            refreshIcon.removeClass('spinning');
+                        }, 1000);
+                    },
+                    error: function() {
+                        console.error(`Error refreshing data for ${deviceIp}`);
+                        refreshIcon.removeClass('spinning');
+                    }
+                });
+            }
+        }
+        
+// Modified code for the updateDeviceTable function to properly update all device dropdown menus
+// Update device table with data from WebSocket
+function updateDeviceTable(data) {
+    // Find all device rows
+    const deviceRows = $("tbody tr[data-device-ip]");
+    
+    // Create a map for quick lookups
+    const deviceMap = {};
+    data.devices.forEach(device => {
+        deviceMap[device.ip] = device;
+    });
+    
+    // Update each row
+    deviceRows.each(function() {
+        const row = $(this);
+        const deviceIp = row.attr("data-device-ip");
+        const device = deviceMap[deviceIp];
+        
+        if (device) {
+            // Update all device properties
+            row.find("td:nth-child(1)").text(device.display_name);
+            
+            // Update ADB status with error information
+            const adbCell = row.find("td:nth-child(3)");
+            if (device.status) {
+                adbCell.html('<div class="adb-status"><span class="text-success">✅</span></div>');
+            } else {
+                let adbContent = '<div class="adb-status"><span class="text-danger position-relative">❌';
+                
+                if (device.adb_error) {
+                    adbContent += '<span class="adb-error-badge">!</span>';
+                }
+                
+                adbContent += '</span>';
+                
+                if (device.adb_error) {
+                    adbContent += '<span class="status-tooltip">' + device.adb_error + '</span>';
+                }
+                
+                adbContent += '</div>';
+                adbCell.html(adbContent);
+            }
+            
+            // Update alive status
+            row.find(".is-alive").html(device.is_alive ? "✅" : "❌");
+            
+            // Update control status
+            const controlCell = row.find("td:nth-child(5)");
+            controlCell.html(
+                device.control_enabled ? 
+                '<span class="badge bg-success">Active</span>' : 
+                '<span class="badge bg-secondary">Inactive</span>'
+            );
+            
+            // Update versions
+            row.find(".pogo-version").text(device.pogo);
+            row.find(".mitm-version").text(device.mitm);
+            row.find(".module-version").text(device.module);
+            
+            // Update memory value
+            row.find(".device-memory").text(formatMemory(device.mem_free));
+        }
+    });
+    
+    // Get the latest version info
+    const pogoLatest = data.pogo_latest;
+    const pogoPrevious = data.pogo_previous;
+    
+    console.log("Latest PoGo version:", pogoLatest, "Previous PoGo version:", pogoPrevious);
+    
+    // Update the main update button
+    $("#updateButton").text(`PoGo Update All (${pogoLatest})`);
+    
+    // Update all device dropdown menus individually
+    deviceRows.each(function() {
+        const row = $(this);
+        const dropdownMenu = row.find('.dropdown-menu').filter(function() {
+            return $(this).prev('button').text().trim() === 'PoGo Version';
+        });
+        
+        if (dropdownMenu.length) {
+            // Get all forms in this specific dropdown
+            const forms = dropdownMenu.find('form[action="/pogo/device-update"]');
+            
+            // First form is for update
+            if (forms.length > 0) {
+                const updateForm = forms.eq(0);
+                updateForm.find('input[name="version"]').val(pogoLatest);
+                updateForm.find('button.dropdown-item').text(`${pogoLatest}`);
+            }
+            
+            // Second form is for downgrade
+            if (forms.length > 1) {
+                const downgradeForm = forms.eq(1);
+                downgradeForm.find('input[name="version"]').val(pogoPrevious);
+                downgradeForm.find('button.dropdown-item').text(`${pogoPrevious}`);
+            }
+        }
+    });
+
+    // If sorting was applied, reapply it
+    if (currentSort && currentSort.column !== null) {
+        const sortType = $(".sortable").eq(currentSort.column).data('sort');
+        sortTable(currentSort.column, currentSort.direction, sortType);
+    }
+}
+    </script>
+    
+    <!-- PIF Versions Loading Script -->
+    <script>
+        // Function to load PIF versions
+        function loadPifVersions() {
+            $.ajax({
+                url: "/api/pif-versions",
+                type: "GET",
+                dataType: "json",
+                success: function(data) {
+                    if (data.versions && data.versions.length > 0) {
+                        // Update all PIF version dropdowns
+                        $(".pif-versions-dropdown").each(function() {
+                            const deviceIp = $(this).data("device-ip");
+                            let items = '';
+                            
+                            // Add the top 5 versions
+                            const versionsToShow = data.versions.slice(0, 5);
+                            versionsToShow.forEach(function(version) {
+                                items += `
+                                <li>
+                                    <form method="post" action="/pif/device-update" class="pif-update-form">
+                                        <input type="hidden" name="device_ip" value="${deviceIp}">
+                                        <input type="hidden" name="version" value="${version.version}">
+                                        <button type="submit" class="dropdown-item">
+                                            ${version.version} (${new Date(version.published_at).toLocaleDateString()})
+                                        </button>
+                                    </form>
+                                </li>`;
+                            });
+                            
+                            // Replace content
+                            $(this).html(items);
+                        });
+                        
+                        // Add event listener to the newly created forms
+                        $(".pif-update-form").on("submit", function(e) {
+                            // Show update modal when submitting form
+                            updateModal.show();
+                        });
+                    }
+                },
+                error: function() {
+                    console.error("Error loading PIF versions");
+                    $(".pif-versions-dropdown").html('<li><div class="dropdown-item text-center text-danger">Error loading versions</div></li>');
+                }
+            });
+        }
+        
+        // Load PIF versions when page loads
+        $(document).ready(function() {
+            loadPifVersions();
+            
+            // Refresh versions when clicking on dropdown
+            $(document).on("click", ".pif-versions-dropdown", function(e) {
+                if ($(this).children().length <= 1) {
+                    loadPifVersions();
+                }
+            });
+        });
+    </script>
+
+    <!-- Table sorting functionality -->
+    <script>
+        let currentSort = { column: null, direction: 'asc' };
+        
+        $(document).ready(function() {
+            // Handle click on sortable column headers
+            $(".sortable").click(function() {
+                const column = $(this).index();
+                const sortType = $(this).data('sort');
+                
+                // Toggle sort direction if clicking the same column
+                if (currentSort.column === column) {
+                    currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
+                } else {
+                    currentSort.column = column;
+                    currentSort.direction = 'asc';
+                }
+                
+                // Update header appearance
+                $(".sortable").removeClass('asc desc');
+                $(this).addClass(currentSort.direction);
+                
+                // Sort the table
+                sortTable(column, currentSort.direction, sortType);
+            });
+        });
+        
+        // Function to sort table rows
+        function sortTable(column, direction, sortType) {
+            const table = $("#deviceTable");
+            const tbody = table.find('tbody');
+            const rows = tbody.find('tr').get();
+            
+            // Sort rows based on cell content and sort type
+            rows.sort(function(a, b) {
+                // Get the content of cells to compare
+                const aValue = getCellValue(a, column, sortType);
+                const bValue = getCellValue(b, column, sortType);
+                
+                // Compare based on sort type
+                if (sortType === 'text') {
+                    // Standard text comparison
+                    return direction === 'asc' ? 
+                        aValue.localeCompare(bValue) : 
+                        bValue.localeCompare(aValue);
+                } else if (sortType === 'status') {
+                    // Status icons - ✅ should be higher than ❌
+                    const aStatus = aValue.includes('✅') ? 1 : 0;
+                    const bStatus = bValue.includes('✅') ? 1 : 0;
+                    return direction === 'asc' ?
+                        bStatus - aStatus :  // ✅ first in ascending
+                        aStatus - bStatus;   // ✅ first in descending
+                } else if (sortType === 'version') {
+                    // Version comparison (x.y.z)
+                    return direction === 'asc' ?
+                        compareVersions(aValue, bValue) :
+                        compareVersions(bValue, aValue);
+                } else if (sortType === 'memory') {
+                    // Memory comparison (convert MB/GB to number)
+                    return direction === 'asc' ?
+                        compareMemory(aValue, bValue) :
+                        compareMemory(bValue, aValue);
+                }
+                return 0;
+            });
+            
+            // Re-append rows in the new order
+            $.each(rows, function(index, row) {
+                tbody.append(row);
+            });
+        }
+        
+        // Helper to get cell value based on sort type
+        function getCellValue(row, column, sortType) {
+            const cell = $(row).find('td').eq(column);
+            let value = cell.text().trim();
+            
+            // For special elements, get the contained text
+            if (sortType === 'status') {
+                // For status cells, return the complete HTML to check for ✅ or ❌
+                if (column === 2) { // ADB column
+                    return cell.html();
+                } else {
+                    return cell.text();
+                }
+            }
+            
+            return value;
+        }
+        
+        // Compare version strings like "0.123.45"
+        function compareVersions(a, b) {
+            if (a === 'N/A' && b === 'N/A') return 0;
+            if (a === 'N/A') return -1;
+            if (b === 'N/A') return 1;
+            
+            const aParts = a.split('.').map(p => parseInt(p) || 0);
+            const bParts = b.split('.').map(p => parseInt(p) || 0);
+            
+            // Compare each part
+            for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
+                const aPart = aParts[i] || 0;
+                const bPart = bParts[i] || 0;
+                if (aPart !== bPart) {
+                    return aPart - bPart;
+                }
+            }
+            return 0;
+        }
+        
+        // Compare memory values like "1,25 MB" or "234,5 kB"
+        function compareMemory(a, b) {
+            if (a === 'N/A' && b === 'N/A') return 0;
+            if (a === 'N/A') return -1;
+            if (b === 'N/A') return 1;
+            
+            // Extract number and unit
+            const aMatch = a.match(/([0-9,.]+)\s*(kB|MB|GB)/);
+            const bMatch = b.match(/([0-9,.]+)\s*(kB|MB|GB)/);
+            
+            if (!aMatch || !bMatch) return 0;
+            
+            // Get numeric value and unit
+            let aValue = parseFloat(aMatch[1].replace(',', '.'));
+            let bValue = parseFloat(bMatch[1].replace(',', '.'));
+            
+            const aUnit = aMatch[2];
+            const bUnit = bMatch[2];
+            
+            // Convert to KB for comparison
+            if (aUnit === 'MB') aValue *= 1024;
+            else if (aUnit === 'GB') aValue *= 1024 * 1024;
+            
+            if (bUnit === 'MB') bValue *= 1024;
+            else if (bUnit === 'GB') bValue *= 1024 * 1024;
+            
+            return aValue - bValue;
+        }
+    </script>
+</body>
+</html>

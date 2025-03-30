@@ -1,0 +1,44 @@
+version: '3.7'
+
+# Rotomina - Pokemon GO Device Management
+# Quick start configuration file
+
+services:
+  rotomina:
+    image: ghcr.io/f3ger/rotomina:latest
+    container_name: rotomina
+    restart: unless-stopped
+    volumes:
+      # Config file (will be created automatically if it doesn't exist)
+      - type: bind
+        source: ./config.json
+        target: /app/config.json
+      # Data directory for persistent storage
+      - type: bind
+        source: ./data
+        target: /app/data
+        
+    # NETWORK CONFIGURATION OPTIONS (choose one):
+    
+    # Option 1: Host network (recommended for most users)
+    # This allows direct ADB communication with devices on your network
+    network_mode: host
+    
+    # Option 2: Bridge network with port mapping (uncomment if Option 1 causes issues)
+    # ports:
+    #   - "8000:8000"     # Web interface
+    #   - "5037:5037"     # ADB port
+    
+    # Environment settings
+    environment:
+      - TZ=Europe/Berlin  # Change to your timezone
+    
+    # ADB needs privileged mode to work properly
+    privileged: true
+
+# INSTRUCTIONS:
+# 1. Make sure Docker is installed
+# 2. Save this file as docker-compose.yml
+# 3. Run: docker-compose up -d
+# 4. Access Rotomina at http://localhost:8000
+# 5. Login with admin/admin (change password immediately!)

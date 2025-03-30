@@ -1,0 +1,27 @@
+{
+    "users": [
+        {
+            "username": "admin",
+            "password": "admin"
+        }
+    ],
+    "devices": [
+        {
+            "ip": "192.168.1.100:5555",
+            "display_name": "Example-Device-01",
+            "pogo_version": "N/A",
+            "mitm_version": "N/A",
+            "module_version": "N/A",
+            "control_enabled": false,
+            "memory_threshold": 200
+        }
+    ],
+    "rotomApiUrl": "http://your-api-url/api/status",
+    "rotomApiUser": "apiuser",
+    "rotomApiPass": "apipassword",
+    "api_check_interval": 60,
+    "memory_threshold": 100,
+    "discord_webhook_url": "",
+    "pif_auto_update_enabled": false,
+    "pogo_auto_update_enabled": false
+}

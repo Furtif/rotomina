@@ -1,0 +1,33 @@
+version: '3.7'
+
+services:
+  rotomina:
+    image: ghcr.io/f3ger/rotomina:latest
+    container_name: rotomina
+    restart: unless-stopped
+    volumes:
+      # Config file (create this before starting)
+      - type: bind
+        source: ./config.json
+        target: /app/config.json
+      # Data directory for persistent storage
+      - type: bind
+        source: ./data
+        target: /app/data
+    # Network settings - two options:
+    
+    # Option 1: Host network for easy ADB (recommended for production)
+    # Uncomment the next line and comment out the "ports" section
+    # network_mode: host
+    
+    # Option 2: Bridge network with port mapping (if host network causes issues)
+    ports:
+      - "8000:8000"
+      - "5037:5037" # ADB port
+    
+    # Environment settings
+    environment:
+      - TZ=Europe/Berlin
+    
+    # ADB needs privileged mode
+    privileged: true

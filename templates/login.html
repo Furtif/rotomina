@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="login-container">
+    <h2><i class="fas fa-sign-in-alt"></i> Login</h2>
+    {% if error %}
+    <div class="error">
+        <i class="fas fa-exclamation-triangle"></i> {{ error }}
+    </div>
+    {% endif %}
+    <form method="post" action="/login">
+        <label>Username:
+            <input type="text" name="username" required />
+        </label>
+        <br/>
+        <label>Password:
+            <input type="password" name="password" required />
+        </label>
+        <br/><br/>
+        <button type="submit"><i class="fas fa-unlock"></i> Login</button>
+    </form>
+</div>
+{% endblock %}
