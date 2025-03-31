@@ -2653,7 +2653,7 @@ async def pogo_update(request: Request):
         return RedirectResponse(url="/status", status_code=302)
     else:
         print("✅ All devices already have the latest version. No updates needed.")
-        return RedirectResponse(url="/status?info=All devices already up to date", status_code=302))
+        return RedirectResponse(url="/status?info=All devices already up to date", status_code=302)
 
 @app.post("/settings/toggle-pif-autoupdate", response_class=HTMLResponse)
 def toggle_pif_autoupdate(request: Request, enabled: Optional[str] = Form(None)):
