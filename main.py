@@ -1313,13 +1313,8 @@ def install_on_device(device_ip: str, downgrade: bool, extract_dir: Path):
         version = versions.get("latest", {}).get("version", "unknown")
         
         # Send notification
-        asyncio.create_task(notify_update_installed(device_name, device_ip, "Pokemon GO", version))    
-        
-        subprocess.run(
-            ["adb", "-s", device_ip, "reboot"],
-            check=True,
-            timeout=60
-        )
+        asyncio.create_task(notify_update_installed(device_name, device_ip, "Pokemon GO", version))
+       
     except subprocess.CalledProcessError as e:
         print(f"Installation failed: {str(e)}")
         raise
