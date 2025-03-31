@@ -2598,25 +2598,62 @@ async def pogo_update(request: Request):
         return redirect
     
     config = load_config()
-    device_ips = [dev["ip"] for dev in config.get("devices", [])]
     
+    # Get the latest version info
     versions = get_available_versions()
     if not versions:
         return RedirectResponse(url="/status?error=No versions found", status_code=302)
+        
+    latest_version = versions["latest"]["version"]
+    print(f"📌 Latest PoGO version available: {latest_version}")
     
-    entry = versions["latest"]
-    apk_file = APK_DIR / entry["filename"]
+    # Prepare for installation - extract APK if needed
+    apk_file = APK_DIR / versions["latest"]["filename"]
     if not apk_file.exists():
-        apk_file = download_apk(entry)
+        apk_file = download_apk(versions["latest"])
     
     # Use version-specific extraction directory
-    version_extract_dir = EXTRACT_DIR / entry["version"]
+    version_extract_dir = EXTRACT_DIR / latest_version
     unzip_apk(apk_file, version_extract_dir)
     
-    # Start update for all devices with the specific version directory
-    asyncio.create_task(perform_installations(device_ips, version_extract_dir))
+    # Get all devices and check which ones need updates
+    devices_to_update = []
+    for device in config.get("devices", []):
+        ip = device["ip"]
+        try:
+            # Need to reconnect to each device to get accurate version info
+            if check_adb_connection(ip)[0]:
+                # Clear cache to get fresh version info
+                get_device_details.cache_clear()
+                # Get current installed version
+                device_details = get_device_details(ip)
+                installed_version = device_details.get("pogo_version", "N/A")
+                
+                print(f"Device {ip} has PoGO version {installed_version}, latest is {latest_version}")
+                
+                # Compare versions
+                if installed_version == "N/A":
+                    print(f"Device {ip} has unknown PoGO version, will update")
+                    devices_to_update.append(ip)
+                elif installed_version != latest_version:
+                    print(f"Device {ip} needs update from {installed_version} to {latest_version}")
+                    devices_to_update.append(ip)
+                else:
+                    print(f"Device {ip} already has latest version {latest_version}, skipping")
+            else:
+                print(f"Device {ip} not reachable via ADB, skipping update check")
+        except Exception as e:
+            print(f"Error checking version for {ip}: {str(e)}")
     
-    return RedirectResponse(url="/status", status_code=302)
+    # Update device count
+    update_count = len(devices_to_update)
+    if update_count > 0:
+        print(f"🚀 Installing PoGO version {latest_version} on {update_count} devices that need updates")
+        asyncio.create_task(perform_installations(devices_to_update, version_extract_dir))
+        return RedirectResponse(url="/status", status_code=302)
+    else:
+        print("✅ All devices already have the latest version. No updates needed.")
+        return RedirectResponse(url="/status?info=All devices already up to date", status_code=302))
 
 @app.post("/settings/toggle-pif-autoupdate", response_class=HTMLResponse)
 def toggle_pif_autoupdate(request: Request, enabled: Optional[str] = Form(None)):
