@@ -467,32 +467,87 @@ def get_device_details(device_id: str) -> dict:
 
 def ensure_adb_keys() -> str:
     """
-    Ensures the ADB public key exists and returns its content.
-    If the public key does not exist or is empty, it is generated.
+    Ensures both ADB private and public keys exist and returns the public key content.
+    If keys don't exist or are empty, they are generated.
+    Works correctly in Docker/Ubuntu environments.
     
     Returns:
-        str: The ADB public key content.
+        str: The ADB public key content or empty string if generation fails.
     """
-    if platform.system() == "Windows":
-        adb_private_key = os.path.expanduser("~\\.android\\adbkey")
-        adb_public_key = os.path.expanduser("~\\.android\\adbkey.pub")
-    else:
-        adb_private_key = "/root/.android/adbkey"
-        adb_public_key = "/root/.android/adbkey.pub"
-    
-    # Check if the public key exists and is not empty
-    if not os.path.exists(adb_public_key) or os.path.getsize(adb_public_key) == 0:
-        print("Generating missing ADB public key...")
-        subprocess.run(["openssl", "rsa", "-in", adb_private_key, "-pubout", "-out", adb_public_key], check=True)
-    
-    # Read and return the content of the public key
-    with open(adb_public_key, "r") as f:
-        return f.read().strip()
+    try:
+        if platform.system() == "Windows":
+            android_dir = os.path.expanduser("~\\.android")
+            adb_private_key = os.path.join(android_dir, "adbkey")
+            adb_public_key = os.path.join(android_dir, "adbkey.pub")
+        else:
+            android_dir = "/root/.android"
+            adb_private_key = os.path.join(android_dir, "adbkey")
+            adb_public_key = os.path.join(android_dir, "adbkey.pub")
+        
+        # Ensure the .android directory exists
+        if not os.path.exists(android_dir):
+            print(f"Creating Android directory: {android_dir}")
+            os.makedirs(android_dir, exist_ok=True)
+        
+        # Check if the private key exists and has content
+        private_key_exists = os.path.exists(adb_private_key) and os.path.getsize(adb_private_key) > 0
+        
+        # Check if the public key exists and has content
+        public_key_exists = os.path.exists(adb_public_key) and os.path.getsize(adb_public_key) > 0
+        
+        # If private key does not exist, generate it using adb keygen
+        if not private_key_exists:
+            print(f"Private ADB key not found at {adb_private_key}, generating new keys...")
+            try:
+                # Try using adb keygen first
+                subprocess.run(["adb", "keygen", adb_private_key], check=True, timeout=10)
+                private_key_exists = os.path.exists(adb_private_key) and os.path.getsize(adb_private_key) > 0
+                print(f"Generated private key with adb keygen: {private_key_exists}")
+            except (subprocess.SubprocessError, FileNotFoundError) as e:
+                print(f"adb keygen failed: {str(e)}, trying alternative approach...")
+                
+                # Alternative: generate private key with OpenSSL
+                try:
+                    subprocess.run(
+                        ["openssl", "genrsa", "-out", adb_private_key, "2048"],
+                        check=True, timeout=10
+                    )
+                    private_key_exists = os.path.exists(adb_private_key) and os.path.getsize(adb_private_key) > 0
+                    print(f"Generated private key with OpenSSL: {private_key_exists}")
+                except (subprocess.SubprocessError, FileNotFoundError) as e:
+                    print(f"Failed to generate private key with OpenSSL: {str(e)}")
+        
+        # If private key exists but public key doesn't, generate public key
+        if private_key_exists and not public_key_exists:
+            print(f"Public key not found at {adb_public_key}, generating from private key...")
+            try:
+                subprocess.run(
+                    ["openssl", "rsa", "-in", adb_private_key, "-pubout", "-out", adb_public_key],
+                    check=True, timeout=10
+                )
+                public_key_exists = os.path.exists(adb_public_key) and os.path.getsize(adb_public_key) > 0
+                print(f"Generated public key: {public_key_exists}")
+            except (subprocess.SubprocessError, FileNotFoundError) as e:
+                print(f"Failed to generate public key: {str(e)}")
+        
+        # Read and return the content of the public key if it exists
+        if public_key_exists:
+            with open(adb_public_key, "r") as f:
+                content = f.read().strip()
+                print(f"Found ADB public key ({len(content)} bytes)")
+                return content
+        else:
+            print("Failed to ensure ADB keys exist")
+            return ""
+    except Exception as e:
+        print(f"Error ensuring ADB keys: {str(e)}")
+        traceback.print_exc()
+        return ""
 
 def authorize_device_with_adb_key(device_id: str) -> bool:
     """
-    Pushes the ADB public keys to the device to enable automatic authorization.
-    Includes the standard ADB key and any additional keys in ./data/adb/adbkey*.pub
+    Pushes all available ADB public keys to the device to enable automatic authorization.
+    Includes the system ADB key and any additional keys in ./data/adb/adbkey*.pub
     
     Args:
         device_id: Device identifier (serial or IP:port)
@@ -504,13 +559,13 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
         # Collect all ADB keys
         keys = []
         
-        # 1. Get the standard ADB public key
-        standard_adb_key = ensure_adb_keys()
-        if standard_adb_key:
-            keys.append(standard_adb_key)
-            print(f"Added standard ADB key for device {device_id}")
+        # 1. Get the system ADB public key
+        system_adb_key = ensure_adb_keys()
+        if system_adb_key:
+            keys.append(system_adb_key)
+            print(f"Added system ADB key for device {device_id}")
         else:
-            print(f"No standard ADB key available for device {device_id}")
+            print(f"No system ADB key available for device {device_id}")
         
         # 2. Get additional keys from ./data/adb directory
         additional_keys_dir = Path("./data/adb")
@@ -522,17 +577,26 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
                         key_content = f.read().strip()
                         if key_content:
                             keys.append(key_content)
-                            print(f"Added additional key from {key_file}")
+                            print(f"Added additional key from {key_file.name} ({len(key_content)} bytes)")
+                        else:
+                            print(f"Warning: Key file {key_file.name} is empty, skipping")
                 except Exception as e:
                     print(f"Error reading key file {key_file}: {str(e)}")
         else:
-            print(f"Additional keys directory {additional_keys_dir} does not exist")
+            print(f"Additional keys directory {additional_keys_dir} does not exist, creating it")
+            try:
+                additional_keys_dir.mkdir(parents=True, exist_ok=True)
+                print(f"Created directory {additional_keys_dir}")
+            except Exception as e:
+                print(f"Failed to create directory {additional_keys_dir}: {str(e)}")
         
         # If no keys found, return
         if not keys:
             print(f"No ADB keys available for device {device_id}")
             return False
             
+        print(f"Found {len(keys)} unique ADB keys to install")
+        
         # Check if device is connected
         connected, error = check_adb_connection(device_id)
         if not connected:
@@ -544,6 +608,9 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
             temp_path = temp.name
             for key in keys:
                 temp.write(key + "\n")
+            
+            # Flush to ensure all data is written
+            temp.flush()
         
         try:
             # Check if device is rooted
@@ -560,23 +627,32 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
                 print(f"Device {device_id} has root access, pushing {len(keys)} ADB key(s)...")
                 
                 # Push the combined key file to device
-                subprocess.run(
+                push_result = subprocess.run(
                     ["adb", "-s", device_id, "push", temp_path, "/sdcard/adbkey.pub"],
-                    check=True,
-                    timeout=10
+                    timeout=10,
+                    capture_output=True,
+                    text=True
                 )
+                
+                if push_result.returncode != 0:
+                    print(f"Failed to push keys to device: {push_result.stderr}")
+                    return False
+                    
+                print(f"Successfully pushed keys to device {device_id}")
                 
                 # First, try to remove the immutable flag if it exists
                 try:
-                    subprocess.run(
-                        ["adb", "-s", device_id, "shell", "su -c 'chattr -i /data/misc/adb/adb_keys'"],
+                    chattr_result = subprocess.run(
+                        ["adb", "-s", device_id, "shell", "su -c 'chattr -i /data/misc/adb/adb_keys 2>/dev/null || true'"],
                         timeout=5,
-                        capture_output=True
+                        capture_output=True,
+                        text=True,
+                        shell=True
                     )
-                    print(f"Removed immutable flag from existing ADB keys file on {device_id}")
+                    print(f"Attempted to remove immutable flag on {device_id}")
                 except Exception as e:
                     # It's okay if this fails - the file might not exist or chattr might not be available
-                    print(f"Note: Could not remove immutable flag (this is normal if the file doesn't exist yet): {str(e)}")
+                    print(f"Note: Could not run chattr command: {str(e)}")
                 
                 # Create directories, backup existing keys (if any) and add new keys
                 cmds = [
@@ -584,37 +660,49 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
                     # Create empty file if it doesn't exist
                     "su -c 'touch /data/misc/adb/adb_keys'",
                     # Backup existing keys to a temporary file
-                    "su -c 'cp /data/misc/adb/adb_keys /data/misc/adb/adb_keys.bak'",
+                    "su -c 'cp /data/misc/adb/adb_keys /data/misc/adb/adb_keys.bak 2>/dev/null || touch /data/misc/adb/adb_keys.bak'",
                     # Create new keys file with unique entries (sort -u removes duplicates)
-                    "su -c 'cat /data/misc/adb/adb_keys.bak /sdcard/adbkey.pub | sort -u > /data/misc/adb/adb_keys'",
+                    "su -c 'cat /data/misc/adb/adb_keys.bak /sdcard/adbkey.pub | sort -u > /data/misc/adb/adb_keys.new && mv /data/misc/adb/adb_keys.new /data/misc/adb/adb_keys'",
                     # Set proper permissions
                     "su -c 'chmod 644 /data/misc/adb/adb_keys'",
                     # Remove temporary files
-                    "su -c 'rm /sdcard/adbkey.pub /data/misc/adb/adb_keys.bak'",
-                    # Set immutable flag
-                    "su -c 'chattr +i /data/misc/adb/adb_keys'",
+                    "su -c 'rm -f /sdcard/adbkey.pub /data/misc/adb/adb_keys.bak'",
+                    # Set immutable flag - but make it optional
+                    "su -c 'chattr +i /data/misc/adb/adb_keys 2>/dev/null || true'",
                     # Ensure ADB is enabled
                     "su -c 'settings put global adb_enabled 1'"
                 ]
                 
+                success = True
                 for cmd in cmds:
                     try:
+                        print(f"Running command: {cmd}")
                         result = subprocess.run(
                             ["adb", "-s", device_id, "shell", cmd],
                             timeout=10,
                             capture_output=True,
                             text=True
                         )
-                        if result.returncode != 0 and "chattr" in cmd and "Operation not supported" in result.stderr:
-                            print(f"Note: chattr command not supported on this device, skipping immutable flag")
-                        elif result.returncode != 0:
+                        if result.returncode != 0:
                             print(f"Warning: Command '{cmd}' returned non-zero exit code: {result.returncode}")
-                            print(f"Error output: {result.stderr}")
+                            if result.stderr:
+                                print(f"Error output: {result.stderr}")
+                            
+                            # Only mark as a failure if it's not the chattr command
+                            if "chattr" not in cmd:
+                                success = False
                     except subprocess.TimeoutExpired:
-                        print(f"Warning: Command '{cmd}' timed out, continuing...")
+                        print(f"Warning: Command '{cmd}' timed out")
+                        # Only mark as failure for critical commands
+                        if "chattr" not in cmd and "settings" not in cmd:
+                            success = False
                 
-                print(f"Successfully authorized device {device_id} with {len(keys)} key(s)")
-                return True
+                if success:
+                    print(f"Successfully authorized device {device_id} with {len(keys)} key(s)")
+                    return True
+                else:
+                    print(f"Some commands failed when authorizing device {device_id}")
+                    return False
             else:
                 print(f"Device {device_id} does not have root access, cannot push ADB keys")
                 return False
@@ -622,8 +710,8 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
             # Remove the temporary file
             try:
                 os.unlink(temp_path)
-            except:
-                pass
+            except Exception as e:
+                print(f"Warning: Failed to remove temporary file {temp_path}: {str(e)}")
     except Exception as e:
         print(f"Error authorizing device {device_id}: {str(e)}")
         traceback.print_exc()
