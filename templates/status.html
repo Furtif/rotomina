@@ -107,6 +107,31 @@
             background-color: var(--bs-btn-hover-bg);
         }
         
+        /* Custom outline button styles */
+        .btn-outline-warning {
+            color: #ffc107;
+            border-color: #ffc107;
+            background-color: var(--bs-btn-bg);
+        }
+        
+        .btn-outline-warning:hover {
+            color: #000;
+            background-color: #ffc107;
+            border-color: #ffc107;
+        }
+        
+        .btn-outline-danger {
+            color: #dc3545;
+            border-color: #dc3545;
+            background-color: var(--bs-btn-bg);
+        }
+        
+        .btn-outline-danger:hover {
+            color: #fff;
+            background-color: #dc3545;
+            border-color: #dc3545;
+        }
+        
         /* Status badges */
         .badge {
             padding: 0.4em 0.65em;
@@ -374,6 +399,26 @@
         #deviceTable tbody tr:hover {
             background-color: rgba(255, 255, 255, 0.08) !important;
         }
+        
+        /* Device action buttons layout */
+        .device-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.3rem;
+        }
+        
+        .device-actions .btn-group,
+        .device-actions .device-control-buttons,
+        .device-actions form,
+        .device-actions button {
+            margin-right: 0.3rem;
+            margin-bottom: 0.3rem;
+        }
+        
+        /* Consistent button widths */
+        .device-actions .btn {
+            min-width: 60px;
+        }
     </style>
 </head>
 <body>
@@ -495,39 +540,56 @@
                                         <td class="module-version">{{ device.module }}</td>
                                         <td class="device-memory">{{ device.mem_free|format_memory }}</td>
                                         <td>
-                                            <div class="btn-group me-2">
-                                                <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                                                    PoGo Version
-                                                </button>
-                                                <ul class="dropdown-menu dropdown-menu-dark">
-                                                    <li>
-                                                        <form method="post" action="/pogo/device-update">
-                                                            <input type="hidden" name="device_ip" value="{{ device.ip }}:5555">
-                                                            <input type="hidden" name="version" value="{{ pogo_latest }}">
-                                                            <button type="submit" class="dropdown-item">{{ pogo_latest }}</button>
-                                                        </form>
-                                                    </li>
-                                                    <li>
-                                                        <form method="post" action="/pogo/device-update">
-                                                            <input type="hidden" name="device_ip" value="{{ device.ip }}:5555">
-                                                            <input type="hidden" name="version" value="{{ pogo_previous }}">
-                                                            <button type="submit" class="dropdown-item">{{ pogo_previous }}</button>
-                                                        </form>
-                                                    </li>
-                                                </ul>
+                                            <div class="device-actions">
+                                                <div class="btn-group">
+                                                    <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                                        PoGo
+                                                    </button>
+                                                    <ul class="dropdown-menu dropdown-menu-dark">
+                                                        <li>
+                                                            <form method="post" action="/pogo/device-update">
+                                                                <input type="hidden" name="device_ip" value="{{ device.ip }}">
+                                                                <input type="hidden" name="version" value="{{ pogo_latest }}">
+                                                                <button type="submit" class="dropdown-item">{{ pogo_latest }}</button>
+                                                            </form>
+                                                        </li>
+                                                        <li>
+                                                            <form method="post" action="/pogo/device-update">
+                                                                <input type="hidden" name="device_ip" value="{{ device.ip }}">
+                                                                <input type="hidden" name="version" value="{{ pogo_previous }}">
+                                                                <button type="submit" class="dropdown-item">{{ pogo_previous }}</button>
+                                                            </form>
+                                                        </li>
+                                                    </ul>
+                                                </div>
+                                                
+                                                <div class="btn-group">
+                                                    <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+                                                        PIF
+                                                    </button>
+                                                    <ul class="dropdown-menu dropdown-menu-dark pif-versions-dropdown" data-device-ip="{{ device.ip }}">
+                                                        <li><div class="dropdown-item text-center">Loading versions...</div></li>
+                                                    </ul>
+                                                </div>
+                                                                                                
+                                                <form action="/devices/restart-apps" method="post">
+                                                    <input type="hidden" name="device_ip" value="{{ device.ip }}">
+                                                    <button type="submit" class="btn btn-sm btn-outline-warning" 
+                                                            onclick="return confirm('Restart apps on {{ device.display_name }}?')" 
+                                                            title="Restart Apps">
+                                                        Restart
+                                                    </button>
+                                                </form>
+                                                
+                                                <form action="/devices/reboot" method="post">
+                                                    <input type="hidden" name="device_ip" value="{{ device.ip }}">
+                                                    <button type="submit" class="btn btn-sm btn-outline-danger" 
+                                                            onclick="return confirm('Reboot device {{ device.display_name }}?')" 
+                                                            title="Reboot Device">
+                                                        Reboot
+                                                    </button>
+                                                </form>
                                             </div>
-                                            <div class="btn-group me-2">
-                                                <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                                                    PIF Version
-                                                </button>
-                                                <ul class="dropdown-menu dropdown-menu-dark pif-versions-dropdown" data-device-ip="{{ device.ip }}:5555">
-                                                    <li><div class="dropdown-item text-center">Loading versions...</div></li>
-                                                </ul>
-                                            </div>
-                                            <button class="btn btn-sm btn-outline-secondary refresh-device-button" 
-                                                   onclick="refreshDeviceData('{{ device.ip }}')" title="Refresh version data">
-                                                <i id="refresh-{{ device.ip }}" class="refresh-icon">↻</i>
-                                            </button>
                                         </td>
                                     </tr>
                                     {% endfor %}
@@ -900,7 +962,7 @@ function updateDeviceTable(data) {
     deviceRows.each(function() {
         const row = $(this);
         const dropdownMenu = row.find('.dropdown-menu').filter(function() {
-            return $(this).prev('button').text().trim() === 'PoGo Version';
+            return $(this).prev('button').text().trim() === 'PoGo';
         });
         
         if (dropdownMenu.length) {

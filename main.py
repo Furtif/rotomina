@@ -155,7 +155,7 @@ async def send_discord_notification(message: str, title: str = None, color: int 
             "title": title or "Rotomina Notification",
             "description": message,
             "color": color,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
             "footer": {
                 "text": "Rotomina"
             }
@@ -2350,6 +2350,8 @@ def update_memory_threshold(request: Request, device_ip: str = Form(...), memory
 @app.post("/pif/device-update", response_class=HTMLResponse)
 async def pif_device_update(request: Request, device_ip: str = Form(...), version: str = Form(...)):
     global update_in_progress, current_progress
+
+    device_id = format_device_id(device_ip)
     
     if redirect := require_login(request):
         return redirect
@@ -2407,6 +2409,7 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
     global update_in_progress, current_progress
     
     try:
+        device_id = format_device_id(device_ip)
         print(f"Starting PIF module installation for {device_ip}")
         
         # Make sure ADB connection is established
@@ -2540,6 +2543,7 @@ async def pogo_device_update(request: Request, device_ip: str = Form(...), versi
         return redirect
 
     # Check if version is available
+    device_id = format_device_id(device_ip)
     versions = get_available_versions()
     target_version = None
     
@@ -2598,62 +2602,25 @@ async def pogo_update(request: Request):
         return redirect
     
     config = load_config()
+    device_ips = [dev["ip"] for dev in config.get("devices", [])]
     
-    # Get the latest version info
     versions = get_available_versions()
     if not versions:
         return RedirectResponse(url="/status?error=No versions found", status_code=302)
-        
-    latest_version = versions["latest"]["version"]
-    print(f"📌 Latest PoGO version available: {latest_version}")
     
-    # Prepare for installation - extract APK if needed
-    apk_file = APK_DIR / versions["latest"]["filename"]
+    entry = versions["latest"]
+    apk_file = APK_DIR / entry["filename"]
     if not apk_file.exists():
-        apk_file = download_apk(versions["latest"])
+        apk_file = download_apk(entry)
     
     # Use version-specific extraction directory
-    version_extract_dir = EXTRACT_DIR / latest_version
+    version_extract_dir = EXTRACT_DIR / entry["version"]
     unzip_apk(apk_file, version_extract_dir)
     
-    # Get all devices and check which ones need updates
-    devices_to_update = []
-    for device in config.get("devices", []):
-        ip = device["ip"]
-        try:
-            # Need to reconnect to each device to get accurate version info
-            if check_adb_connection(ip)[0]:
-                # Clear cache to get fresh version info
-                get_device_details.cache_clear()
-                # Get current installed version
-                device_details = get_device_details(ip)
-                installed_version = device_details.get("pogo_version", "N/A")
-                
-                print(f"Device {ip} has PoGO version {installed_version}, latest is {latest_version}")
-                
-                # Compare versions
-                if installed_version == "N/A":
-                    print(f"Device {ip} has unknown PoGO version, will update")
-                    devices_to_update.append(ip)
-                elif installed_version != latest_version:
-                    print(f"Device {ip} needs update from {installed_version} to {latest_version}")
-                    devices_to_update.append(ip)
-                else:
-                    print(f"Device {ip} already has latest version {latest_version}, skipping")
-            else:
-                print(f"Device {ip} not reachable via ADB, skipping update check")
-        except Exception as e:
-            print(f"Error checking version for {ip}: {str(e)}")
+    # Start update for all devices with the specific version directory
+    asyncio.create_task(perform_installations(device_ips, version_extract_dir))
     
-    # Update device count
-    update_count = len(devices_to_update)
-    if update_count > 0:
-        print(f"🚀 Installing PoGO version {latest_version} on {update_count} devices that need updates")
-        asyncio.create_task(perform_installations(devices_to_update, version_extract_dir))
-        return RedirectResponse(url="/status", status_code=302)
-    else:
-        print("✅ All devices already have the latest version. No updates needed.")
-        return RedirectResponse(url="/status?info=All devices already up to date", status_code=302)
+    return RedirectResponse(url="/status", status_code=302)
 
 @app.post("/settings/toggle-pif-autoupdate", response_class=HTMLResponse)
 def toggle_pif_autoupdate(request: Request, enabled: Optional[str] = Form(None)):
@@ -2747,6 +2714,78 @@ async def api_pif_versions(request: Request):
         
     versions = await get_pif_versions_for_ui()
     return {"versions": versions}
+
+@app.post("/devices/restart-apps", response_class=HTMLResponse)
+async def restart_apps(request: Request, device_ip: str = Form(...)):
+    if redirect := require_login(request):
+        return redirect
+    
+    try:
+        # Formatiere Geräte-ID korrekt (fügt Port hinzu, falls nötig)
+        device_id = format_device_id(device_ip)
+        
+        # Get device details for notification
+        device_details = get_device_details(device_id)
+        display_name = device_details.get("display_name", device_id.split(":")[0] if ":" in device_id else device_id)
+        
+        # Check if control is enabled
+        config = load_config()
+        device = next((d for d in config["devices"] if d["ip"] == device_id), None)
+        control_enabled = device and device.get("control_enabled", False)
+        
+        # Force stop apps
+        print(f"Stopping apps on {device_id}...")
+        subprocess.run(
+            ["adb", "-s", device_id, "shell", "am force-stop com.github.furtif.furtifformaps"],
+            timeout=10
+        )
+        subprocess.run(
+            ["adb", "-s", device_id, "shell", "am force-stop com.nianticlabs.pokemongo"],
+            timeout=10
+        )
+        
+        # If control is enabled, start apps again
+        if control_enabled:
+            print(f"Restarting apps on {device_id} with control...")
+            await start_furtif_app(device_id, True)
+        else:
+            # Just start the app without login sequence
+            print(f"Restarting apps on {device_id} without control...")
+            await start_furtif_app(device_id, False)
+            
+        # Clear cache to refresh status
+        device_status_cache.clear()
+        get_device_details.cache_clear()
+        
+        return RedirectResponse(url="/status", status_code=302)
+    except Exception as e:
+        print(f"Error restarting apps on {device_id}: {str(e)}")
+        return RedirectResponse(url="/status?error=Failed to restart apps", status_code=302)
+
+@app.post("/devices/reboot", response_class=HTMLResponse)
+def reboot_device(request: Request, device_ip: str = Form(...)):
+    if redirect := require_login(request):
+        return redirect
+    
+    try:
+        # Formatiere Geräte-ID korrekt (fügt Port hinzu, falls nötig)
+        device_id = format_device_id(device_ip)
+        
+        # Get device details for notification
+        device_details = get_device_details(device_id)
+        display_name = device_details.get("display_name", device_id.split(":")[0] if ":" in device_id else device_id)
+        
+        print(f"Rebooting device {device_id}...")
+        subprocess.run(
+            ["adb", "-s", device_id, "reboot"],
+            check=True,
+            timeout=60
+        )
+        
+        return RedirectResponse(url="/status", status_code=302)
+    except Exception as e:
+        print(f"Error rebooting device {device_id}: {str(e)}")
+        return RedirectResponse(url="/status?error=Failed to reboot device", status_code=302)
 
 if __name__ == "__main__":
     import uvicorn
