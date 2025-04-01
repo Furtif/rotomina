@@ -544,10 +544,55 @@ def ensure_adb_keys() -> str:
         traceback.print_exc()
         return ""
 
+def sync_system_adb_key():
+    """
+    Synchronizes the system ADB key from /root/.android/adbkey.pub to BASE_DIR/data/adb/adbkey.pub
+    This ensures that the system key is also available in the additional keys directory.
+    """
+    try:
+        # Define paths
+        if platform.system() == "Windows":
+            system_key_path = os.path.expanduser("~\\.android\\adbkey.pub")
+        else:
+            system_key_path = "/root/.android/adbkey.pub"
+        
+        # Use the application's base directory structure for consistency
+        additional_keys_dir = BASE_DIR / "data" / "adb"
+        target_key_path = additional_keys_dir / "adbkey.pub"
+        
+        # Check if system key exists
+        if not os.path.exists(system_key_path):
+            print(f"System ADB key not found at {system_key_path}")
+            return False
+        
+        # Ensure additional keys directory exists
+        if not additional_keys_dir.exists():
+            print(f"Creating additional keys directory: {additional_keys_dir}")
+            additional_keys_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Read system key
+        with open(system_key_path, "r") as f:
+            key_content = f.read().strip()
+            
+        if not key_content:
+            print(f"System ADB key is empty, nothing to sync")
+            return False
+            
+        # Write to target location
+        with open(target_key_path, "w") as f:
+            f.write(key_content)
+            
+        print(f"Successfully synchronized system ADB key to {target_key_path}")
+        return True
+            
+    except Exception as e:
+        print(f"Error synchronizing system ADB key: {str(e)}")
+        return False
+
 def authorize_device_with_adb_key(device_id: str) -> bool:
     """
     Pushes all available ADB public keys to the device to enable automatic authorization.
-    Includes the system ADB key and any additional keys in ./data/adb/adbkey*.pub
+    Includes the system ADB key and any additional keys in BASE_DIR/data/adb/adbkey*.pub
     
     Args:
         device_id: Device identifier (serial or IP:port)
@@ -567,8 +612,8 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
         else:
             print(f"No system ADB key available for device {device_id}")
         
-        # 2. Get additional keys from ./data/adb directory
-        additional_keys_dir = Path("./data/adb")
+        # 2. Get additional keys from the data/adb directory
+        additional_keys_dir = BASE_DIR / "data" / "adb"
         if additional_keys_dir.exists():
             print(f"Checking for additional ADB keys in {additional_keys_dir}")
             for key_file in additional_keys_dir.glob("adbkey*.pub"):
@@ -590,12 +635,18 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
             except Exception as e:
                 print(f"Failed to create directory {additional_keys_dir}: {str(e)}")
         
+        # Deduplicate keys
+        unique_keys = []
+        for key in keys:
+            if key not in unique_keys:
+                unique_keys.append(key)
+                
         # If no keys found, return
-        if not keys:
+        if not unique_keys:
             print(f"No ADB keys available for device {device_id}")
             return False
             
-        print(f"Found {len(keys)} unique ADB keys to install")
+        print(f"Found {len(unique_keys)} unique ADB keys to install")
         
         # Check if device is connected
         connected, error = check_adb_connection(device_id)
@@ -606,7 +657,7 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
         # Create a temporary file with all keys
         with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp:
             temp_path = temp.name
-            for key in keys:
+            for key in unique_keys:
                 temp.write(key + "\n")
             
             # Flush to ensure all data is written
@@ -624,7 +675,7 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
             has_root = "uid=0" in root_check.stdout
             
             if has_root:
-                print(f"Device {device_id} has root access, pushing {len(keys)} ADB key(s)...")
+                print(f"Device {device_id} has root access, pushing {len(unique_keys)} ADB key(s)...")
                 
                 # Push the combined key file to device
                 push_result = subprocess.run(
@@ -698,7 +749,7 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
                             success = False
                 
                 if success:
-                    print(f"Successfully authorized device {device_id} with {len(keys)} key(s)")
+                    print(f"Successfully authorized device {device_id} with {len(unique_keys)} key(s)")
                     return True
                 else:
                     print(f"Some commands failed when authorizing device {device_id}")
