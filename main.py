@@ -10,6 +10,8 @@ import datetime
 import threading
 import traceback
 import tempfile
+import os
+import platform
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from functools import wraps
@@ -248,11 +250,14 @@ async def notify_update_downloaded(update_type: str, version: str):
 # ======================================
 # ADB Functions
 # ======================================
+connected_devices = set()
+
 @ttl_cache(ttl=3600)
 def check_adb_connection(device_id: str) -> tuple[bool, str]:
     """
     Checks ADB connection to device and returns status and error message.
     Supports both network devices (IP:Port) and USB devices (serial number).
+    Reuses existing connections when possible.
     
     Args:
         device_id: Either serial number (USB) or IP:Port (network)
@@ -260,9 +265,24 @@ def check_adb_connection(device_id: str) -> tuple[bool, str]:
     Returns:
         tuple: (is_connected, error_message)
     """
+    global connected_devices
+    
     try:
-        # Remove leading and trailing whitespace
         device_id = device_id.strip()
+        
+        if device_id in connected_devices:
+            devices_result = subprocess.run(
+                ["adb", "devices"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            device_line_pattern = f"{device_id}\tdevice"
+            if device_line_pattern in devices_result.stdout:
+                return True, ""
+                
+            connected_devices.discard(device_id)
         
         # Determine device type
         # A USB device (serial number) does not contain a colon
@@ -315,6 +335,8 @@ def check_adb_connection(device_id: str) -> tuple[bool, str]:
         device_line_pattern = f"{device_id}\tdevice"
         if device_line_pattern in devices_result.stdout:
             print(f"Device {device_id} found with 'device' status")
+            # Gerät zur Liste verbundener Geräte hinzufügen (Optimierung)
+            connected_devices.add(device_id)
             return True, ""
             
         # Device is connected but in a different state
@@ -442,6 +464,170 @@ def get_device_details(device_id: str) -> dict:
             "mitm_version": "N/A",
             "module_version": "N/A"
         }
+
+def ensure_adb_keys() -> str:
+    """
+    Ensures the ADB public key exists and returns its content.
+    If the public key does not exist or is empty, it is generated.
+    
+    Returns:
+        str: The ADB public key content.
+    """
+    if platform.system() == "Windows":
+        adb_private_key = os.path.expanduser("~\\.android\\adbkey")
+        adb_public_key = os.path.expanduser("~\\.android\\adbkey.pub")
+    else:
+        adb_private_key = "/root/.android/adbkey"
+        adb_public_key = "/root/.android/adbkey.pub"
+    
+    # Check if the public key exists and is not empty
+    if not os.path.exists(adb_public_key) or os.path.getsize(adb_public_key) == 0:
+        print("Generating missing ADB public key...")
+        subprocess.run(["openssl", "rsa", "-in", adb_private_key, "-pubout", "-out", adb_public_key], check=True)
+    
+    # Read and return the content of the public key
+    with open(adb_public_key, "r") as f:
+        return f.read().strip()
+
+def authorize_device_with_adb_key(device_id: str) -> bool:
+    """
+    Pushes the ADB public keys to the device to enable automatic authorization.
+    Includes the standard ADB key and any additional keys in ./data/adb/adbkey*.pub
+    
+    Args:
+        device_id: Device identifier (serial or IP:port)
+        
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    try:
+        # Collect all ADB keys
+        keys = []
+        
+        # 1. Get the standard ADB public key
+        standard_adb_key = ensure_adb_keys()
+        if standard_adb_key:
+            keys.append(standard_adb_key)
+            print(f"Added standard ADB key for device {device_id}")
+        else:
+            print(f"No standard ADB key available for device {device_id}")
+        
+        # 2. Get additional keys from ./data/adb directory
+        additional_keys_dir = Path("./data/adb")
+        if additional_keys_dir.exists():
+            print(f"Checking for additional ADB keys in {additional_keys_dir}")
+            for key_file in additional_keys_dir.glob("adbkey*.pub"):
+                try:
+                    with open(key_file, "r") as f:
+                        key_content = f.read().strip()
+                        if key_content:
+                            keys.append(key_content)
+                            print(f"Added additional key from {key_file}")
+                except Exception as e:
+                    print(f"Error reading key file {key_file}: {str(e)}")
+        else:
+            print(f"Additional keys directory {additional_keys_dir} does not exist")
+        
+        # If no keys found, return
+        if not keys:
+            print(f"No ADB keys available for device {device_id}")
+            return False
+            
+        # Check if device is connected
+        connected, error = check_adb_connection(device_id)
+        if not connected:
+            print(f"Cannot authorize device {device_id}: {error}")
+            return False
+        
+        # Create a temporary file with all keys
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False) as temp:
+            temp_path = temp.name
+            for key in keys:
+                temp.write(key + "\n")
+        
+        try:
+            # Check if device is rooted
+            root_check = subprocess.run(
+                ["adb", "-s", device_id, "shell", "su", "-c", "id"],
+                timeout=5,
+                capture_output=True,
+                text=True
+            )
+            
+            has_root = "uid=0" in root_check.stdout
+            
+            if has_root:
+                print(f"Device {device_id} has root access, pushing {len(keys)} ADB key(s)...")
+                
+                # Push the combined key file to device
+                subprocess.run(
+                    ["adb", "-s", device_id, "push", temp_path, "/sdcard/adbkey.pub"],
+                    check=True,
+                    timeout=10
+                )
+                
+                # First, try to remove the immutable flag if it exists
+                try:
+                    subprocess.run(
+                        ["adb", "-s", device_id, "shell", "su -c 'chattr -i /data/misc/adb/adb_keys'"],
+                        timeout=5,
+                        capture_output=True
+                    )
+                    print(f"Removed immutable flag from existing ADB keys file on {device_id}")
+                except Exception as e:
+                    # It's okay if this fails - the file might not exist or chattr might not be available
+                    print(f"Note: Could not remove immutable flag (this is normal if the file doesn't exist yet): {str(e)}")
+                
+                # Create directories, backup existing keys (if any) and add new keys
+                cmds = [
+                    "su -c 'mkdir -p /data/misc/adb'",
+                    # Create empty file if it doesn't exist
+                    "su -c 'touch /data/misc/adb/adb_keys'",
+                    # Backup existing keys to a temporary file
+                    "su -c 'cp /data/misc/adb/adb_keys /data/misc/adb/adb_keys.bak'",
+                    # Create new keys file with unique entries (sort -u removes duplicates)
+                    "su -c 'cat /data/misc/adb/adb_keys.bak /sdcard/adbkey.pub | sort -u > /data/misc/adb/adb_keys'",
+                    # Set proper permissions
+                    "su -c 'chmod 644 /data/misc/adb/adb_keys'",
+                    # Remove temporary files
+                    "su -c 'rm /sdcard/adbkey.pub /data/misc/adb/adb_keys.bak'",
+                    # Set immutable flag
+                    "su -c 'chattr +i /data/misc/adb/adb_keys'",
+                    # Ensure ADB is enabled
+                    "su -c 'settings put global adb_enabled 1'"
+                ]
+                
+                for cmd in cmds:
+                    try:
+                        result = subprocess.run(
+                            ["adb", "-s", device_id, "shell", cmd],
+                            timeout=10,
+                            capture_output=True,
+                            text=True
+                        )
+                        if result.returncode != 0 and "chattr" in cmd and "Operation not supported" in result.stderr:
+                            print(f"Note: chattr command not supported on this device, skipping immutable flag")
+                        elif result.returncode != 0:
+                            print(f"Warning: Command '{cmd}' returned non-zero exit code: {result.returncode}")
+                            print(f"Error output: {result.stderr}")
+                    except subprocess.TimeoutExpired:
+                        print(f"Warning: Command '{cmd}' timed out, continuing...")
+                
+                print(f"Successfully authorized device {device_id} with {len(keys)} key(s)")
+                return True
+            else:
+                print(f"Device {device_id} does not have root access, cannot push ADB keys")
+                return False
+        finally:
+            # Remove the temporary file
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+    except Exception as e:
+        print(f"Error authorizing device {device_id}: {str(e)}")
+        traceback.print_exc()
+        return False
 
 # ======================================
 # APK Management with UnownHash Mirror
@@ -1472,7 +1658,7 @@ async def run_login_sequence(device_id: str, max_retries=3):
                         start_x = int(width * 0.5)
                         start_y = int(height * 0.75)
                         end_x = int(width * 0.5)
-                        end_y = int(height * 0.10)
+                        end_y = int(height * 0.05)
                         
                         # Perform swipe
                         swipe_cmd = f'adb -s {device_id} shell "input swipe {start_x} {start_y} {end_x} {end_y} 500"'
@@ -2030,7 +2216,7 @@ async def get_status_data():
         
         devices.append({
             "display_name": details.get("display_name", ip.split(":")[0]),
-            "ip": ip.split(":")[0],
+            "ip": ip,
             "status": status.get("adb_status", False),
             "adb_error": status.get("adb_error", ""),
             "is_alive": status["is_alive"],
@@ -2194,7 +2380,7 @@ def status_page(request: Request):
         
         devices.append({
             "display_name": details.get("display_name", ip.split(":")[0]),
-            "ip": ip.split(":")[0],
+            "ip": ip,
             "status": check_adb_connection(ip)[0],
             "is_alive": "✅" if status["is_alive"] else "❌",
             "pogo": details.get("pogo_version", "N/A"),
@@ -2683,7 +2869,7 @@ def api_status(request: Request):
         
         devices.append({
             "display_name": details.get("display_name", ip.split(":")[0]),
-            "ip": ip.split(":")[0],
+            "ip": ip,
             "status": status.get("adb_status", False),
             "adb_error": status.get("adb_error", ""),
             "is_alive": status["is_alive"],
@@ -2786,6 +2972,26 @@ def reboot_device(request: Request, device_ip: str = Form(...)):
     except Exception as e:
         print(f"Error rebooting device {device_id}: {str(e)}")
         return RedirectResponse(url="/status?error=Failed to reboot device", status_code=302)
+
+@app.post("/devices/authorize", response_class=HTMLResponse)
+def authorize_device(request: Request, device_ip: str = Form(...)):
+    if redirect := require_login(request):
+        return redirect
+    
+    try:
+        # Format device ID consistently
+        device_id = format_device_id(device_ip)
+        
+        # Attempt to authorize device
+        success = authorize_device_with_adb_key(device_id)
+        
+        if success:
+            return RedirectResponse(url="/settings?success=Device authorized successfully", status_code=302)
+        else:
+            return RedirectResponse(url="/settings?error=Failed to authorize device. Root access required.", status_code=302)
+    except Exception as e:
+        print(f"Error authorizing device {device_ip}: {str(e)}")
+        return RedirectResponse(url="/settings?error=Authorization error: {str(e)}", status_code=302)
 
 if __name__ == "__main__":
     import uvicorn

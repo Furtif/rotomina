@@ -235,6 +235,48 @@
     .table-striped > tbody > tr:hover {
         background-color: rgba(255, 255, 255, 0.05);
     }
+    
+    /* Button group for device actions */
+    .device-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.3rem;
+    }
+    
+    .device-actions .btn {
+        margin-bottom: 0.3rem;
+    }
+    
+    /* Success and error alerts */
+    .alert-success, .alert-danger, .alert-info {
+        color: #e0e0e0;
+        border: none;
+    }
+    
+    .alert-success {
+        background-color: rgba(40, 167, 69, 0.2);
+    }
+    
+    .alert-danger {
+        background-color: rgba(220, 53, 69, 0.2);
+    }
+    
+    .alert-info {
+        background-color: rgba(13, 202, 240, 0.2);
+    }
+    
+    /* Info outline button */
+    .btn-outline-info {
+        color: #0dcaf0;
+        border-color: #0dcaf0;
+        background-color: var(--bs-btn-bg);
+    }
+    
+    .btn-outline-info:hover {
+        color: #000;
+        background-color: #0dcaf0;
+        border-color: #0dcaf0;
+    }
 </style>
 </head>
 <body>
@@ -265,6 +307,21 @@
 
         <div class="row mt-4">
             <div class="col-12">
+                <!-- Display success/error messages if available -->
+                {% if request.query_params.get('success') %}
+                <div class="alert alert-success alert-dismissible fade show mb-4" role="alert">
+                    {{ request.query_params.get('success') }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {% endif %}
+                
+                {% if request.query_params.get('error') %}
+                <div class="alert alert-danger alert-dismissible fade show mb-4" role="alert">
+                    {{ request.query_params.get('error') }}
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                </div>
+                {% endif %}
+                
                 <!-- SECTION 1: DEVICE MANAGEMENT (Now first as requested) -->
                 <div class="card mb-4">
                     <div class="card-header d-flex justify-content-between align-items-center">
@@ -277,11 +334,12 @@
                         <table class="table table-striped">
                             <thead>
                                 <tr>
-                                    <th>IP Address</th>
+                                    <th>IP / ID</th>
                                     <th>Device Name</th>
+                                    <th>ADB</th>
                                     <th>Control Active</th>
                                     <th>Memory Threshold (MB)</th>
-                                    <th>Action</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -289,6 +347,16 @@
                                 <tr>
                                     <td>{{ device.ip }}</td>
                                     <td>{{ device.display_name }}</td>
+                                    <td>
+                                        <!-- Authorize ADB button -->
+                                        <form action="/devices/authorize" method="post">
+                                            <input type="hidden" name="device_ip" value="{{ device.ip }}">
+                                            <button type="submit" class="btn btn-sm btn-outline-info" 
+                                                    onclick="return confirm('Authorize device {{ device.display_name }}? This requires root access on the device.')">
+                                                Authorize
+                                            </button>
+                                        </form>
+                                    </td>
                                     <td>
                                         <!-- Toggle switch for control_enabled -->
                                         <div class="form-check form-switch">
@@ -311,10 +379,12 @@
                                         </form>
                                     </td>
                                     <td>
-                                        <!-- Remove checkbox -->
-                                        <div class="form-check">
-                                            <input class="form-check-input" type="checkbox" name="devices" value="{{ device.ip }}" form="removeForm">
-                                            <label class="form-check-label">Remove</label>
+                                        <div class="device-actions">
+                                            <!-- Remove checkbox -->
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="devices" value="{{ device.ip }}" form="removeForm">
+                                                <label class="form-check-label">Remove</label>
+                                            </div>
                                         </div>
                                     </td>
                                 </tr>
@@ -366,16 +436,7 @@
                                                 Enter the Discord webhook URL to receive status notifications. Leave empty to disable notifications.
                                             </div>
                                         </div>
-                                    </div>
-                                    <div class="alert alert-info">
-                                        <strong>Status notifications include:</strong>
-                                        <ul class="mb-0 mt-2">
-                                            <li>Device offline/online status changes</li>
-                                            <li>Memory-based application restarts</li>
-                                            <li>Updates (MITM, PIF, PoGo) installed on devices</li>
-                                            <li>New updates available for download</li>
-                                        </ul>
-                                    </div>
+                                    </div>                                    
                                 </div>
                             </div>
                             
@@ -498,6 +559,11 @@
                     }
                 });
             });
+            
+            // Auto-dismiss alerts after 5 seconds
+            setTimeout(function() {
+                $('.alert').alert('close');
+            }, 5000);
         });
     </script>
 </body>

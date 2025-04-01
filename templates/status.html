@@ -492,7 +492,7 @@
                                 <thead>
                                     <tr>
                                         <th class="sortable" data-sort="text">Name <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="text">IP <span class="sort-icon"></span></th>
+                                        <th class="sortable" data-sort="text">IP / ID <span class="sort-icon"></span></th>
                                         <th class="sortable" data-sort="status">ADB <span class="sort-icon"></span></th>
                                         <th class="sortable" data-sort="status">Alive <span class="sort-icon"></span></th>
                                         <th class="sortable" data-sort="status">Control <span class="sort-icon"></span></th>
@@ -507,7 +507,7 @@
                                     {% for device in devices %}
                                     <tr data-device-ip="{{ device.ip }}">
                                         <td>{{ device.display_name }}</td>
-                                        <td>{{ device.ip }}</td>
+                                        <td>{{ device.ip.split(':')[0] if ':' in device.ip else device.ip }}</td>
                                         <td>
                                             <div class="adb-status">
                                                 {% if device.status %}
@@ -906,6 +906,10 @@ function updateDeviceTable(data) {
         if (device) {
             // Update all device properties
             row.find("td:nth-child(1)").text(device.display_name);
+            
+            // Update IP/ID with only the IP part if it has a port
+            const ipDisplay = device.ip.includes(':') ? device.ip.split(':')[0] : device.ip;
+            row.find("td:nth-child(2)").text(ipDisplay);
             
             // Update ADB status with error information
             const adbCell = row.find("td:nth-child(3)");
