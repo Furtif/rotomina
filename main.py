@@ -790,6 +790,13 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
                     )
                 
                 # Enable ADB in settings
+                print("Enabling Development in settings...")
+                subprocess.run(
+                    ["adb", "-s", device_id, "shell", "su -c", "development_settings_enabled 1"],
+                    timeout=5,
+                    capture_output=True
+                )
+                # Enable ADB in settings
                 print("Enabling ADB in settings...")
                 subprocess.run(
                     ["adb", "-s", device_id, "shell", "su -c", "settings put global adb_enabled 1"],
