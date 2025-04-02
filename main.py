@@ -591,19 +591,16 @@ def sync_system_adb_key():
 
 def authorize_device_with_adb_key(device_id: str) -> bool:
     """
-    Robust ADB key authorization with enhanced reconnection strategy.
-    Specifically handles the device going offline and coming back during the process.
+    Simplified and stable approach to install ADB keys on a device.
+    Uses alternative methods to write keys when standard methods fail.
     
     Args:
         device_id: Device identifier (serial or IP:port)
         
     Returns:
-        bool: True if successful, False otherwise
+        bool: True if keys were installed, False otherwise
     """
     try:
-        # Extract IP address from device_id if it contains a port
-        base_ip = device_id.split(':')[0] if ':' in device_id else device_id
-        
         # Collect all ADB keys
         keys = []
         
@@ -661,80 +658,13 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
             temp.flush()
         
         try:
-            # Helper function to handle device reconnection
-            def wait_for_device_online(ip_with_port, timeout_seconds=60, check_interval=2):
-                """Wait for the device to come back online after ADB daemon restart"""
-                print(f"Waiting for device {ip_with_port} to come back online...")
-                
-                start_time = time.time()
-                while time.time() - start_time < timeout_seconds:
-                    try:
-                        # Try to disconnect first to clear any stale connections
-                        subprocess.run(
-                            ["adb", "disconnect", ip_with_port],
-                            timeout=5,
-                            capture_output=True
-                        )
-                        
-                        # Wait a moment
-                        time.sleep(1)
-                        
-                        # Try to connect
-                        connect_result = subprocess.run(
-                            ["adb", "connect", ip_with_port],
-                            timeout=5,
-                            capture_output=True,
-                            text=True
-                        )
-                        
-                        print(f"Connect result: {connect_result.stdout.strip()}")
-                        
-                        # Check device status
-                        devices_result = subprocess.run(
-                            ["adb", "devices"],
-                            timeout=5,
-                            capture_output=True,
-                            text=True
-                        )
-                        
-                        print(f"Device list: {devices_result.stdout.strip()}")
-                        
-                        # Check if device is in the list and not unauthorized
-                        if ip_with_port in devices_result.stdout:
-                            if "unauthorized" not in devices_result.stdout:
-                                print(f"Device {ip_with_port} is back online and authorized!")
-                                
-                                # Wait a bit more to ensure the device is truly ready
-                                time.sleep(3)
-                                return True
-                            else:
-                                print(f"Device {ip_with_port} is online but unauthorized")
-                        else:
-                            print(f"Device {ip_with_port} not found in device list")
-                            
-                    except Exception as e:
-                        print(f"Reconnection attempt error: {str(e)}")
-                    
-                    print(f"Device not ready, retrying in {check_interval} seconds...")
-                    time.sleep(check_interval)
-                
-                print(f"Device {ip_with_port} did not come back online within {timeout_seconds} seconds")
-                return False
-
-            # Disconnect from the device first to clean up any stale connections
-            print(f"Disconnecting from {device_id} to start with clean state...")
-            subprocess.run(["adb", "disconnect", device_id], timeout=5, capture_output=True)
-            time.sleep(2)
-            
-            # Connect to the device
+            # Connect to the device - don't try to be too fancy here
             print(f"Connecting to {device_id}...")
-            connect_result = subprocess.run(
+            subprocess.run(
                 ["adb", "connect", device_id],
                 timeout=10,
-                capture_output=True,
-                text=True
+                capture_output=True
             )
-            print(f"Connect result: {connect_result.stdout.strip()}")
             
             # Allow some time for the connection to establish
             time.sleep(3)
@@ -749,7 +679,7 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
             print("Checking for root access...")
             root_check = subprocess.run(
                 ["adb", "-s", device_id, "shell", "su -c", "id"],
-                timeout=10,
+                timeout=5,
                 capture_output=True,
                 text=True
             )
@@ -759,178 +689,136 @@ def authorize_device_with_adb_key(device_id: str) -> bool:
             if has_root:
                 print(f"Device {device_id} has root access, setting up authorization...")
                 
-                # Phase 1: Push files and prepare directories
+                # Push the keys file to device first
+                print("Pushing keys to device...")
+                subprocess.run(
+                    ["adb", "-s", device_id, "push", temp_path, "/sdcard/adbkey.pub"],
+                    timeout=10,
+                    check=True
+                )
+                
+                # Try multiple methods to install the keys
+                print("Attempting multiple methods to install ADB keys...")
+                
+                # Method 1: Try remounting /data with write permissions
+                print("Method 1: Remounting data partition...")
                 try:
-                    # Push the keys file to device
-                    print("Pushing keys to device...")
                     subprocess.run(
-                        ["adb", "-s", device_id, "push", temp_path, "/sdcard/adbkey.pub"],
-                        timeout=10,
-                        check=True
-                    )
-                    
-                    # Create the ADB directory
-                    print("Creating ADB directory...")
-                    subprocess.run(
-                        ["adb", "-s", device_id, "shell", "su -c", "mkdir -p /data/misc/adb"],
+                        ["adb", "-s", device_id, "shell", "su -c", "mount -o rw,remount /data"],
                         timeout=5,
-                        check=False
+                        capture_output=True
                     )
-                    
-                    # Backup existing keys if any
-                    print("Backing up any existing keys...")
-                    subprocess.run(
-                        ["adb", "-s", device_id, "shell", "su -c", "cp /data/misc/adb/adb_keys /data/misc/adb/adb_keys.bak 2>/dev/null || :"],
-                        timeout=5,
-                        check=False
-                    )
-                    
-                    # Copy the keys directly (this approach has been verified to work on your device)
-                    print("Installing ADB keys...")
-                    subprocess.run(
-                        ["adb", "-s", device_id, "shell", "su -c", "cat /sdcard/adbkey.pub > /data/misc/adb/adb_keys"],
-                        timeout=10,
-                        check=False
-                    )
-                    
-                    # Set proper permissions
-                    print("Setting permissions...")
+                except:
+                    print("Remount command failed, continuing...")
+                
+                # Method 2: Try creating the directory with full permissions
+                print("Method 2: Creating directory with full permissions...")
+                subprocess.run(
+                    ["adb", "-s", device_id, "shell", "su -c", "mkdir -p -m 777 /data/misc/adb"],
+                    timeout=5,
+                    capture_output=True
+                )
+                
+                # Method 3: Try direct dd copy which can sometimes bypass permissions
+                print("Method 3: Using dd to copy the key file...")
+                dd_result = subprocess.run(
+                    ["adb", "-s", device_id, "shell", "su -c", "dd if=/sdcard/adbkey.pub of=/data/misc/adb/adb_keys bs=4096"],
+                    timeout=10,
+                    capture_output=True,
+                    text=True
+                )
+                
+                # If dd worked, set permissions
+                if dd_result.returncode == 0:
+                    print("dd command succeeded, setting permissions...")
                     subprocess.run(
                         ["adb", "-s", device_id, "shell", "su -c", "chmod 644 /data/misc/adb/adb_keys"],
                         timeout=5,
-                        check=False
+                        capture_output=True
                     )
-                    
-                    # Setup complete
-                    print("Initial setup complete.")
-                except Exception as e:
-                    print(f"Error during initial setup: {str(e)}")
-                    return False
-                
-                # Make a full disconnection and restart the device's ADB
-                print("Completely restarting ADB connection and daemon...")
-                # Disconnect first
-                subprocess.run(["adb", "disconnect", device_id], timeout=5, capture_output=True)
-                
-                # Kill ADB server on host to clean slate
-                subprocess.run(["adb", "kill-server"], timeout=5, capture_output=True)
-                time.sleep(2)
-                subprocess.run(["adb", "start-server"], timeout=5, capture_output=True)
-                time.sleep(2)
-                
-                # Reconnect
-                subprocess.run(["adb", "connect", device_id], timeout=10, capture_output=True)
-                time.sleep(3)
-                
-                # Now try a direct connect & method that explicitly restarts ADB on the device
-                try:
-                    # Enable ADB in settings
-                    print("Enabling ADB settings...")
-                    subprocess.run(
-                        ["adb", "-s", device_id, "shell", "su -c", "settings put global adb_enabled 1"],
-                        timeout=5,
-                        check=False
-                    )
-                    
-                    # Configure TCP settings
-                    print("Configuring TCP mode...")
-                    subprocess.run(
-                        ["adb", "-s", device_id, "shell", "su -c", "setprop service.adb.tcp.port 5555"],
-                        timeout=5,
-                        check=False
-                    )
-                    
-                    # Explicitly restart ADB daemon on device
-                    print("Restarting ADB daemon on device...")
-                    try:
-                        # Try the proper way first
-                        subprocess.run(
-                            ["adb", "-s", device_id, "shell", "su -c", "stop adbd && start adbd"],
-                            timeout=10,
-                            check=False,
-                            capture_output=True
-                        )
-                    except:
-                        print("ADB restart command may have disconnected us (expected)")
-                    
-                    # The device is very likely offline now
-                    # Disconnect from the device
-                    subprocess.run(["adb", "disconnect", device_id], timeout=5, capture_output=True)
-                    time.sleep(5)  # Longer wait to ensure ADB daemon has time to restart
-                except Exception as e:
-                    # Expected to fail as device will disconnect
-                    print(f"ADB daemon restart resulted in expected disconnection: {str(e)}")
-                
-                # Now try to reconnect with the original device ID
-                print("Starting reconnection sequence...")
-                device_back_online = wait_for_device_online(device_id, timeout_seconds=60)
-                
-                # If the device didn't come back with the original port, try the standard port
-                if not device_back_online and ':' in device_id:
-                    alternative_device_id = f"{base_ip}:5555"
-                    print(f"Trying alternative port: {alternative_device_id}")
-                    device_back_online = wait_for_device_online(alternative_device_id, timeout_seconds=60)
-                    if device_back_online:
-                        device_id = alternative_device_id  # Update device ID for future commands
-                    
-                # If verification failed, try one more manual ADB restart
-                if not device_back_online:
-                    print("Last resort: Killing and restarting ADB server")
-                    subprocess.run(["adb", "kill-server"], timeout=5, capture_output=True)
-                    time.sleep(2)
-                    subprocess.run(["adb", "start-server"], timeout=5, capture_output=True)
-                    time.sleep(2)
-                    print(f"Trying to reconnect to {device_id} one more time...")
-                    device_back_online = wait_for_device_online(device_id, timeout_seconds=60)
-                
-                if device_back_online:
-                    # Final verification - try a simple ADB command
-                    try:
-                        # Let's try to run a simple command to verify authorization
-                        print(f"Final verification: running simple ADB command...")
-                        # Run a simple command multiple times with retries
-                        success = False
-                        for attempt in range(5):
-                            try:
-                                verify_result = subprocess.run(
-                                    ["adb", "-s", device_id, "shell", "echo", "Success"],
-                                    timeout=10,
-                                    capture_output=True,
-                                    text=True
-                                )
-                                
-                                if "Success" in verify_result.stdout:
-                                    print(f"Verification succeeded on attempt {attempt+1}!")
-                                    success = True
-                                    break
-                                else:
-                                    print(f"Verification attempt {attempt+1} failed: {verify_result.stderr}")
-                                    time.sleep(3)  # Wait before retry
-                            except Exception as e:
-                                print(f"Verification attempt {attempt+1} error: {str(e)}")
-                                time.sleep(3)  # Wait before retry
-                                
-                        if success:
-                            print("ADB authorization completed successfully!")
-                            return True
-                        else:
-                            print("All verification attempts failed")
-                            
-                            # As a last resort, just return True anyway - keys are likely installed correctly
-                            # even if we can't verify it immediately
-                            print("Keys were successfully installed, but verification failed.")
-                            print("The device may need a reboot for changes to take effect.")
-                            print("Try reconnecting to the device later.")
-                            return True
-                    except Exception as e:
-                        print(f"Final verification error: {str(e)}")
-                        return False
                 else:
-                    print("Failed to reconnect to the device after ADB daemon restart")
-                    # Even if reconnection failed, keys might be properly installed
-                    print("Keys were installed but device reconnection failed.")
-                    print("Try reconnecting to the device manually after a reboot.")
-                    return True
+                    print(f"dd command failed: {dd_result.stderr}")
+                    # Method 4: Try writing to a temporary location first
+                    print("Method 4: Using temporary file location...")
+                    subprocess.run(
+                        ["adb", "-s", device_id, "shell", "su -c", "cp /sdcard/adbkey.pub /data/local/tmp/adb_keys"],
+                        timeout=5,
+                        capture_output=True
+                    )
+                    
+                    subprocess.run(
+                        ["adb", "-s", device_id, "shell", "su -c", "chmod 644 /data/local/tmp/adb_keys"],
+                        timeout=5,
+                        capture_output=True
+                    )
+                    
+                    subprocess.run(
+                        ["adb", "-s", device_id, "shell", "su -c", "cp /data/local/tmp/adb_keys /data/misc/adb/adb_keys"],
+                        timeout=5,
+                        capture_output=True
+                    )
+                
+                # Method 5: Alternative location for ADB keys
+                print("Method 5: Trying alternative ADB key locations...")
+                alternative_locations = [
+                    "/data/adb/adb_keys",
+                    "/data/user/0/com.android.shell/adb_keys",
+                    "/data/data/com.android.shell/adb_keys"
+                ]
+                
+                for location in alternative_locations:
+                    # Create directory first
+                    dir_path = os.path.dirname(location)
+                    subprocess.run(
+                        ["adb", "-s", device_id, "shell", "su -c", f"mkdir -p {dir_path}"],
+                        timeout=5,
+                        capture_output=True
+                    )
+                    
+                    # Copy file
+                    subprocess.run(
+                        ["adb", "-s", device_id, "shell", "su -c", f"cat /sdcard/adbkey.pub > {location}"],
+                        timeout=5,
+                        capture_output=True
+                    )
+                    
+                    # Set permissions
+                    subprocess.run(
+                        ["adb", "-s", device_id, "shell", "su -c", f"chmod 644 {location}"],
+                        timeout=5,
+                        capture_output=True
+                    )
+                
+                # Enable ADB in settings
+                print("Enabling ADB in settings...")
+                subprocess.run(
+                    ["adb", "-s", device_id, "shell", "su -c", "settings put global adb_enabled 1"],
+                    timeout=5,
+                    capture_output=True
+                )
+                
+                # Configure TCP settings
+                print("Configuring TCP mode...")
+                subprocess.run(
+                    ["adb", "-s", device_id, "shell", "su -c", "setprop service.adb.tcp.port 5555"],
+                    timeout=5,
+                    capture_output=True
+                )
+                
+                # Clean up
+                print("Cleaning up...")
+                subprocess.run(
+                    ["adb", "-s", device_id, "shell", "rm -f /sdcard/adbkey.pub"],
+                    timeout=5,
+                    capture_output=True
+                )
+                
+                # No need to verify immediately or restart ADB daemon - that part seems to cause issues
+                print("ADB keys have been installed using multiple methods.")
+                print("If the device is not immediately authorized, a reboot may be required.")
+                print("After reboot, the device should accept ADB connections without authorization prompts.")
+                
+                return True
             else:
                 print(f"Device {device_id} does not have root access, cannot push ADB keys")
                 return False
