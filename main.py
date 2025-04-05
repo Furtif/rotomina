@@ -284,18 +284,20 @@ def check_adb_connection(device_id: str) -> tuple[bool, str]:
                 
             connected_devices.discard(device_id)
         
-        # Determine device type
-        # A USB device (serial number) does not contain a colon
-        # A network device contains a colon as IP:Port
+        # Determine device type and ensure proper formatting
+        # Apply format_device_id to ensure consistency
+        original_device_id = device_id
+        device_id = format_device_id(device_id)
+        
+        # If the device ID was changed, log it
+        if original_device_id != device_id:
+            print(f"Device ID formatted from {original_device_id} to {device_id}")
+        
+        # Determine if this is a network device (has IP:port format) or USB device
         is_network_device = ":" in device_id and all(c.isdigit() or c == '.' or c == ':' for c in device_id)
         
         # Debug output
         print(f"Device {device_id} identified as {'network' if is_network_device else 'USB'} device")
-        
-        # For network devices with IP but no port, add the default port
-        if is_network_device and device_id.count(':') == 0:
-            device_id = f"{device_id}:5555"
-            print(f"Added default port: {device_id}")
         
         # Try to establish a connection (only for network devices)
         if is_network_device:
@@ -370,14 +372,14 @@ def format_device_id(device_id: str) -> str:
     Returns:
         str: Correctly formatted device ID
     """
-    # Check if there's a colon in the ID
-    if ":" in device_id:
-        # Is it an IP address without a port?
-        if device_id.count(":") == 1 and all(part.isdigit() for part in device_id.split(".")):
-            # Add default port
-            return f"{device_id}:5555"
+    device_id = device_id.strip()
     
-    # For serial numbers or complete IP:Port combinations, return unchanged
+    # Check if it's an IP address format (digits separated by dots)
+    if re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", device_id):
+        # This is an IP address without port, add default port
+        return f"{device_id}:5555"
+    
+    # If it already has a port or is a serial number, return unchanged
     return device_id
 
 @ttl_cache(ttl=3600)  # Cache remains active for 1 hour
@@ -2370,7 +2372,7 @@ async def check_and_control_devices():
                 
                 # Check if we're in the grace period after a restart
                 last_restart = device_restart_times.get(device_id, 0)
-                if current_time - last_restart < 120:  # 2 minute grace period
+                if current_time - last_restart < 360:  # 6 minute grace period
                     print(f"Device {device_id} is in grace period after restart, skipping checks")
                     continue
                 
@@ -2672,8 +2674,8 @@ async def update_api_status():
                 new_is_alive = device_data.get("isAlive", False)
                 
                 # If device was just starting and reported not alive, but was alive before,
-                # keep the alive status for a short grace period (last 30 seconds)
-                grace_period = 30  # seconds
+                # keep the alive status for a short grace period (last 360 seconds)
+                grace_period = 360  # seconds
                 last_update = current_cache.get("last_update", 0)
                 
                 if (not new_is_alive and current_is_alive and 
@@ -3041,8 +3043,9 @@ def add_device(request: Request, new_ip: str = Form(...)):
     if redirect := require_login(request):
         return redirect
     
-    # Trim whitespace
-    device_id = new_ip.strip()
+    # Trim whitespace and format device ID (add port if needed)
+    device_id = format_device_id(new_ip.strip())
+    print(f"Adding device with formatted ID: {device_id}")
     
     config = load_config()
     if not any(dev["ip"] == device_id for dev in config["devices"]):
