@@ -2658,6 +2658,9 @@ async def update_api_status():
                 current_cache = device_status_cache.get(device_id, {})
                 current_time = time.time()
                 
+                # Add a variable to track when a device was first detected as offline
+                first_detected_offline = current_cache.get("first_detected_offline", 0)
+                
                 # Handle memory values - keep old values if new ones are 0 or null
                 current_mem_free = current_cache.get("mem_free", 0)
                 new_mem_free = device_data.get("lastMemory", {}).get("memFree", 0)
@@ -2669,33 +2672,33 @@ async def update_api_status():
                 else:
                     mem_free = new_mem_free
                 
-                # Handle isAlive status - careful with app startup
+                # Handle isAlive status with improved grace period logic
                 current_is_alive = current_cache.get("is_alive", False)
                 new_is_alive = device_data.get("isAlive", False)
                 
-                # If device was just starting and reported not alive, but was alive before,
-                # keep the alive status for a short grace period (last 360 seconds)
-                grace_period = 360  # seconds
-                last_update = current_cache.get("last_update", 0)
+                # If device is newly detected as offline
+                if current_is_alive and not new_is_alive:
+                    # Store the timestamp of first offline detection
+                    if first_detected_offline == 0:
+                        first_detected_offline = current_time
+                        print(f"Device {device_id} first detected offline at {datetime.datetime.fromtimestamp(current_time)}")
+                # If device is online again, reset the offline detection timestamp
+                elif new_is_alive:
+                    first_detected_offline = 0
                 
-                if (not new_is_alive and current_is_alive and 
-                    (current_time - last_update) < grace_period):
-                    print(f"Device {device_id} reported not alive but in grace period, keeping alive status")
-                    is_alive = current_is_alive
+                # Check if the grace period is still active (6 minutes = 360 seconds)
+                grace_period = 360
+                if (not new_is_alive and current_is_alive and first_detected_offline > 0 and 
+                    (current_time - first_detected_offline < grace_period)):
+                    print(f"Device {device_id} reported not alive but in grace period (since {int(current_time - first_detected_offline)} seconds)")
+                    is_alive = True
                 else:
+                    # Outside grace period or never detected as offline
                     is_alive = new_is_alive
-                
-                # If device was offline and is now online, force detail refresh
-                prev_status = device_last_status.get(device_id, {})
-                prev_is_alive = prev_status.get("is_alive", False)
-                
-                if not prev_is_alive and is_alive:
-                    print(f"Device {device_id} changed from offline to online, clearing version cache")
-                    get_device_details.cache_clear()
-                    force_refresh = True
                     
-                    # We DON'T send notifications here - this is handled by check_and_control_devices
-                    # This avoids duplicate notifications
+                    # If a device is now officially marked as offline (after grace period)
+                    if not is_alive and current_is_alive and first_detected_offline > 0:
+                        print(f"Device {device_id} now officially offline after grace period expired ({int(current_time - first_detected_offline)} seconds)")
                 
                 # Check ADB connection status (now returns tuple of status and error message)
                 adb_status, adb_error = check_adb_connection(device_id)
@@ -2707,9 +2710,20 @@ async def update_api_status():
                     "last_update": current_time,
                     "adb_status": adb_status,
                     "adb_error": adb_error,
+                    "first_detected_offline": first_detected_offline,
                     # Preserve notification tracking data
-                    "last_notification_time": current_cache.get("last_notification_time", 0)
+                    "last_notification_time": current_cache.get("last_notification_time", 0),
+                    "last_details_check": current_cache.get("last_details_check", 0)
                 }
+                
+                # If device was offline and is now online, force detail refresh
+                prev_status = device_last_status.get(device_id, {})
+                prev_is_alive = prev_status.get("is_alive", False)
+                
+                if not prev_is_alive and is_alive:
+                    print(f"Device {device_id} changed from offline to online, clearing version cache")
+                    get_device_details.cache_clear()
+                    force_refresh = True
                 
                 # Store current status for next comparison
                 device_last_status[device_id] = {
