@@ -337,7 +337,7 @@ def check_adb_connection(device_id: str) -> tuple[bool, str]:
         device_line_pattern = f"{device_id}\tdevice"
         if device_line_pattern in devices_result.stdout:
             print(f"Device {device_id} found with 'device' status")
-            # Gerät zur Liste verbundener Geräte hinzufügen (Optimierung)
+            # Add device to list of connected devices (optimization)
             connected_devices.add(device_id)
             return True, ""
             
@@ -446,13 +446,49 @@ def get_device_details(device_id: str) -> dict:
                 if mitm_match:
                     details["mitm_version"] = mitm_match.group(1)
 
-            # Get PIF Module version
-            pif_cmd = f'adb -s {device_id} shell "su -c \'cat /data/adb/modules/playintegrityfix/module.prop\'"'
-            pif_result = subprocess.run(pif_cmd, shell=True, capture_output=True, text=True, timeout=5)
-            if pif_result.stdout:
-                pif_match = re.search(r'version=v?(\d+\.\d+.*)', pif_result.stdout)
-                if pif_match:
-                    details["module_version"] = pif_match.group(1).strip()
+            # Get PlayIntegrityFork/Fix Module version
+            try:
+                # Check the standard module.prop path (which might contain either Fix or Fork)
+                pif_cmd = f'adb -s {device_id} shell "su -c \'cat /data/adb/modules/playintegrityfix/module.prop\'"'
+                pif_result = subprocess.run(pif_cmd, shell=True, capture_output=True, text=True, timeout=5)
+                
+                if pif_result.stdout and "version=" in pif_result.stdout:
+                    # Extract module information
+                    name_match = re.search(r'name=(.+)', pif_result.stdout)
+                    version_match = re.search(r'version=v?(\d+(?:\.\d+)?.*|v?\d+)', pif_result.stdout)
+                    update_url_match = re.search(r'updateJson=(.+)', pif_result.stdout)
+                    
+                    # Determine if it's Fork or Fix
+                    is_fork = False
+                    if name_match and "fork" in name_match.group(1).lower():
+                        is_fork = True
+                    elif update_url_match and "playintegrityfork" in update_url_match.group(1).lower():
+                        is_fork = True
+                    
+                    if version_match:
+                        module_version = version_match.group(1).strip()
+                        if is_fork:
+                            details["module_version"] = f"Fork {module_version}"
+                        else:
+                            details["module_version"] = f"Fix {module_version}" + " (Legacy)"
+                    else:
+                        details["module_version"] = "N/A"
+                else:
+                    # Check for alternative path (just in case)
+                    alt_pif_cmd = f'adb -s {device_id} shell "su -c \'cat /data/adb/modules/playintegrityfork/module.prop\'"'
+                    alt_pif_result = subprocess.run(alt_pif_cmd, shell=True, capture_output=True, text=True, timeout=5)
+                    
+                    if alt_pif_result.stdout and "version=" in alt_pif_result.stdout:
+                        version_match = re.search(r'version=v?(\d+(?:\.\d+)?.*|v?\d+)', alt_pif_result.stdout)
+                        if version_match:
+                            module_version = version_match.group(1).strip()
+                            details["module_version"] = f"Fork {module_version}"
+                        else:
+                            details["module_version"] = "Fork (unknown version)"
+            except Exception as e:
+                print(f"Module version detection error for {device_id}: {e}")
+                traceback.print_exc()
+                
         except Exception as e:
             print(f"Version detection error for {device_id}: {e}")
 
@@ -1637,11 +1673,11 @@ async def mapworld_update_task():
         await asyncio.sleep(3 * 3600)  # 3 hours
 
 # ======================================
-# PIF Version Management Functions - Vereinfacht
+# PIF Version Management Functions
 # ======================================
-PIF_MODULE_DIR = BASE_DIR / "data" / "modules" / "playintegrityfix"
-PIF_GITHUB_API_LATEST = "https://api.github.com/repos/andi2022/PlayIntegrityFix/releases/latest"
-PIF_GITHUB_API_ALL = "https://api.github.com/repos/andi2022/PlayIntegrityFix/releases?per_page=10"
+PIF_MODULE_DIR = BASE_DIR / "data" / "modules" / "playintegrityfork"
+PIF_GITHUB_API_LATEST = "https://api.github.com/repos/osm0sis/PlayIntegrityFork/releases/latest"
+PIF_GITHUB_API_ALL = "https://api.github.com/repos/osm0sis/PlayIntegrityFork/releases?per_page=10"
 
 async def fetch_available_pif_versions():
     """Fetches available PIF versions from GitHub API"""
@@ -1684,8 +1720,7 @@ async def fetch_available_pif_versions():
                     zip_asset = next(
                         (
                             asset for asset in release.get("assets", [])
-                            if asset["name"].startswith("PlayIntegrityFix") 
-                            and asset["name"].endswith(".zip")
+                            if asset["name"].endswith(".zip")
                         ),
                         None
                     )
@@ -1813,12 +1848,12 @@ async def pif_update_task():
         try:
             config = load_config()
             
-            print("🔍 Checking for PIF updates...")
+            print("🔍 Checking for PlayIntegrityFork updates...")
 
             # Fetch available versions regardless of auto-update setting
             versions = await fetch_available_pif_versions()
             if not versions:
-                print("❌ No valid PIF versions available, skipping check.")
+                print("❌ No valid PlayIntegrityFork versions available, skipping check.")
                 await asyncio.sleep(3 * 3600)  # Repeat every 3 hours
                 continue
                 
@@ -1826,7 +1861,7 @@ async def pif_update_task():
             latest_version = versions[0]
             new_version = latest_version["version"]
 
-            print(f"📌 Latest PIF version available: {new_version}")
+            print(f"📌 Latest PlayIntegrityFork version available: {new_version}")
             
             # Skip if we already checked this version
             if new_version == last_checked_version:
@@ -1856,62 +1891,52 @@ async def pif_update_task():
                 ip = device["ip"]
 
                 try:
-                    if check_adb_connection(ip):
-                        # **Get installed version from `config.json`**
-                        installed_version = device.get("module_version", "N/A").strip().lstrip("v")
-
+                    if check_adb_connection(ip)[0]:
+                        # Get installed version from ADB
+                        get_device_details.cache_clear()  # Clear cache to get fresh info
+                        device_details = get_device_details(ip)
+                        installed_version = device_details.get("module_version", "N/A").strip()
+                        
+                        # Check if any module is installed
                         if installed_version == "N/A":
-                            print(f"⚠️ No version stored in config.json for {ip}, fetching via ADB...")
-                            pif_cmd = f'adb -s {ip} shell "su -c \'cat /data/adb/modules/playintegrityfix/module.prop\'"'
-                            pif_result = subprocess.run(pif_cmd, shell=True, capture_output=True, text=True, timeout=5)
-
-                            if pif_result.stdout:
-                                raw_output = pif_result.stdout.strip()
-                                print(f"📌 Raw module.prop output from {ip}:\n{raw_output}")
-
-                                match = re.search(r'^version\s*=\s*v?(\d+\.\d+)', raw_output, re.MULTILINE)
-                                if match:
-                                    installed_version = match.group(1)
-                                    print(f"✅ Installed PIF version from ADB ({ip}): {installed_version}")
-
-                                    # **Save installed version in config.json**
-                                    device["module_version"] = installed_version
-                                    save_config(config)
-                                else:
-                                    print(f"❌ Could not parse PIF version from module.prop on {ip}, setting to '0.0'")
-                                    installed_version = "0.0"
-
-                        installed_version_clean = installed_version.lower()
-                        new_version_clean = new_version.lower()
-
-                        # Parse versions for proper comparison
-                        installed_version_tuple = parse_version(installed_version_clean)
-                        new_version_tuple = parse_version(new_version_clean)
-                        
-                        print(f"🔍 Comparison for {ip}: Installed: {installed_version_clean} {installed_version_tuple}, Available: {new_version_clean} {new_version_tuple}")
-                        
-                        # Skip invalid version comparison
-                        if not installed_version_tuple or not new_version_tuple:
-                            print(f"⚠️ Invalid version format, skipping comparison for {ip}")
+                            print(f"⚠️ No Play Integrity module found on {ip}, will install PlayIntegrityFork")
+                            devices_to_update.append(ip)
                             continue
-
-                        # **Version comparison**
-                        if installed_version_tuple == new_version_tuple:
-                            print(f"✅ Device {ip} already has the latest PIF version, skipping update.")
-                            continue
-
-                        if installed_version_tuple < new_version_tuple:
-                            major_update = new_version_tuple[0] > installed_version_tuple[0]
-                            minor_update = (new_version_tuple[0] == installed_version_tuple[0] and 
-                                            new_version_tuple[1] > installed_version_tuple[1])
                             
-                            if major_update or minor_update:
-                                print(f"🚨 Update needed for {ip}! Installed: {installed_version_clean}, Available: {new_version_clean}")
-                                devices_to_update.append(ip)
+                        # Check which module is installed (Fix or Fork)
+                        if "Legacy" in installed_version:
+                            # Old PlayIntegrityFix found, needs update to Fork
+                            print(f"🔄 Device {ip} has legacy PlayIntegrityFix module, updating to PlayIntegrityFork")
+                            devices_to_update.append(ip)
+                            continue
+                        
+                        # Extract version number from the Fork module version string
+                        if "Fork" in installed_version:
+                            version_match = re.search(r'Fork\s+(\d+\.\d+(?:\.\d+)?)', installed_version)
+                            if version_match:
+                                current_version = version_match.group(1)
+                                print(f"🔍 Current PlayIntegrityFork version on {ip}: {current_version}, available: {new_version}")
+                                
+                                # Compare versions
+                                installed_version_tuple = parse_version(current_version)
+                                new_version_tuple = parse_version(new_version)
+                                
+                                if not installed_version_tuple or not new_version_tuple:
+                                    print(f"⚠️ Invalid version format for comparison on {ip}")
+                                    continue
+                                    
+                                if installed_version_tuple < new_version_tuple:
+                                    print(f"🚨 Update needed for {ip}! Installed: {current_version}, Available: {new_version}")
+                                    devices_to_update.append(ip)
+                                else:
+                                    print(f"✅ Device {ip} already has latest PlayIntegrityFork version, skipping update.")
                             else:
-                                print(f"ℹ️ Minor patch update available for {ip}, but not significant enough to install automatically.")
+                                print(f"⚠️ Could not parse version from {installed_version} on {ip}, scheduling update")
+                                devices_to_update.append(ip)
                         else:
-                            print(f"❌ Device {ip} has a newer PIF version installed, skipping update.")
+                            # Unknown module format, update to be safe
+                            print(f"❓ Unknown module format on {ip}: {installed_version}, scheduling update")
+                            devices_to_update.append(ip)
                     else:
                         print(f"Device {ip} not reachable via ADB, skipping update check")
                 except Exception as e:
@@ -1920,25 +1945,19 @@ async def pif_update_task():
             # Perform updates if needed
             update_count = len(devices_to_update)
             if update_count > 0:
-                print(f"🚀 Installing PIF version {new_version} on {update_count} devices that need updates")
+                print(f"🚀 Installing PlayIntegrityFork version {new_version} on {update_count} devices")
                 
                 for ip in devices_to_update:
                     try:
-                        print(f"⚡ Updating device {ip} to PIF version {new_version}")
+                        print(f"⚡ Updating device {ip} to PlayIntegrityFork version {new_version}")
                         await install_pif_module(ip, module_path)
 
-                        # **After successful update, save new version in `config.json`**
-                        for device in config["devices"]:
-                            if device["ip"] == ip:
-                                device["module_version"] = new_version_clean
-                                save_config(config)
-                                break
                     except Exception as e:
-                        print(f"Error installing PIF on {ip}: {str(e)}")
+                        print(f"Error installing PlayIntegrityFork on {ip}: {str(e)}")
                 
                 # Clear the cache to load new values
                 get_device_details.cache_clear()
-                print("✅ PIF update complete – device details cache cleared.")
+                print("✅ PlayIntegrityFork update complete – device details cache cleared.")
                 
                 # Send WebSocket update after installations
                 status_data = await get_status_data()
@@ -1947,15 +1966,15 @@ async def pif_update_task():
                 print("✅ All devices already have the latest version. No updates needed.")
 
         except Exception as e:
-            print(f"❌ PIF Auto-Update Error: {str(e)}")
+            print(f"❌ PlayIntegrityFork Auto-Update Error: {str(e)}")
             import traceback
             traceback.print_exc()
 
         await asyncio.sleep(3 * 3600)  # Repeat every 3 hours
 
-# Simplified install_pif_module function
+# Updated install_pif_module function to handle transition from PlayIntegrityFix to PlayIntegrityFork
 async def install_pif_module(device_ip: str, pif_module_path=None):
-    print(f"Starting PIF module installation for {device_ip}")
+    print(f"Starting PlayIntegrityFork module installation for {device_ip}")
     try:
         # Increase connection timeouts
         subprocess.run(
@@ -1968,17 +1987,17 @@ async def install_pif_module(device_ip: str, pif_module_path=None):
         # Check if module exists
         if pif_module_path is None:
             # Return if no default module is available
-            print(f"No PIF module path specified")
+            print(f"No PlayIntegrityFork module path specified")
             return
             
         if not Path(pif_module_path).exists():
-            print(f"PIF module not found at {pif_module_path}")
+            print(f"PlayIntegrityFork module not found at {pif_module_path}")
             return
         
         # Extract version from filename
         version = "unknown"
         filename = Path(pif_module_path).name
-        version_match = re.search(r'PlayIntegrityFix_v?(\d+\.\d+)', filename)
+        version_match = re.search(r'v?(\d+\.\d+)', filename)
         if version_match:
             version = version_match.group(1)
         
@@ -1986,12 +2005,22 @@ async def install_pif_module(device_ip: str, pif_module_path=None):
         device_details = get_device_details(device_ip)
         device_name = device_details.get("display_name", device_ip.split(":")[0])
 
-        # Connect and remove old module
+        # Connect and remove old modules - BOTH PlayIntegrityFix AND PlayIntegrityFork
+        print(f"Removing any existing Play Integrity modules from {device_ip}")
         subprocess.run(["adb", "connect", device_ip], check=True, timeout=10)
+        
+        # Remove PlayIntegrityFix (old module)
         subprocess.run(
             ["adb", "-s", device_ip, "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfix'"],
             timeout=15
         )
+        
+        # Also remove PlayIntegrityFork (in case of previous installation)
+        subprocess.run(
+            ["adb", "-s", device_ip, "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfork'"],
+            timeout=15
+        )
+        
         subprocess.run(["adb", "-s", device_ip, "reboot"], check=True, timeout=60)
         
         # Wait for device to come back
@@ -1999,7 +2028,7 @@ async def install_pif_module(device_ip: str, pif_module_path=None):
         await asyncio.sleep(120)
         
         # Push and install module
-        print(f"Pushing PIF module to {device_ip}")
+        print(f"Pushing PlayIntegrityFork module to {device_ip}")
         subprocess.run(
             ["adb", "-s", device_ip, "push", 
              str(pif_module_path), 
@@ -2007,7 +2036,7 @@ async def install_pif_module(device_ip: str, pif_module_path=None):
             check=True,
             timeout=60
         )
-        print(f"Installing PIF module on {device_ip}")
+        print(f"Installing PlayIntegrityFork module on {device_ip}")
         subprocess.run(
             ["adb", "-s", device_ip, "shell", 
              "su -c 'magisk --install-module /data/local/tmp/pif.zip'"],
@@ -2018,22 +2047,22 @@ async def install_pif_module(device_ip: str, pif_module_path=None):
             ["adb", "-s", device_ip, "shell", "rm /data/local/tmp/pif.zip"],
             timeout=15
         )
-        print(f"Rebooting {device_ip} to apply PIF module")
+        print(f"Rebooting {device_ip} to apply PlayIntegrityFork module")
         subprocess.run(["adb", "-s", device_ip, "reboot"], check=True, timeout=60)
 
         device_status_cache.clear()
         get_device_details.cache_clear()
-        print(f"PIF update complete for {device_ip} – device details cache cleared")
+        print(f"PlayIntegrityFork update complete for {device_ip} – device details cache cleared")
 
-        await notify_update_installed(device_name, device_ip, "PlayIntegrityFix", version)
+        await notify_update_installed(device_name, device_ip, "PlayIntegrityFork", version)
     
     except Exception as e:
-        print(f"PIF Installation error for {device_ip}: {str(e)}")
+        print(f"PlayIntegrityFork Installation error for {device_ip}: {str(e)}")
     
     except subprocess.CalledProcessError as e:
-        print(f"PIF Installation failed for {device_ip}: {str(e)}")
+        print(f"PlayIntegrityFork Installation failed for {device_ip}: {str(e)}")
     except subprocess.TimeoutExpired as e:
-        print(f"Timeout during PIF install on {device_ip}: {str(e)}")
+        print(f"Timeout during PlayIntegrityFork install on {device_ip}: {str(e)}")
     finally:
         subprocess.run(["adb", "connect", device_ip], timeout=5)
 
@@ -2430,10 +2459,10 @@ async def check_and_control_devices():
                 
                 # Update status if now alive, but was previously not
                 elif is_alive and not last_status.get(device_id, {}).get("is_alive", True):
-                    # ÄNDERUNG: Keine Online-Benachrichtigung hier senden, das wird nur von start_furtif_app gemacht
+                    # Only update the status, notification is handled by start_furtif_app
                     print(f"Device {device_id} is now online (detected by API), but not sending notification (handled by start_furtif_app only)")
                     
-                    # Nur den Status aktualisieren
+                    # Update the status
                     last_status[device_id]["is_alive"] = True
                 
                 # Always update the current status
@@ -3174,7 +3203,7 @@ async def pif_device_update(request: Request, device_ip: str = Form(...), versio
         if not target_version:
             update_in_progress = False
             current_progress = 0
-            return RedirectResponse(url="/status?error=PIF version not found", status_code=302)
+            return RedirectResponse(url="/status?error=PlayIntegrityFork version not found", status_code=302)
         
         update_progress(30)  # Version found
         
@@ -3186,7 +3215,7 @@ async def pif_device_update(request: Request, device_ip: str = Form(...), versio
         if not pif_module:
             update_in_progress = False
             current_progress = 0
-            return RedirectResponse(url="/status?error=Failed to download PIF version", status_code=302)
+            return RedirectResponse(url="/status?error=Failed to download PlayIntegrityFork version", status_code=302)
         
         # Install on device
         update_progress(60)  # Start installation
@@ -3197,19 +3226,19 @@ async def pif_device_update(request: Request, device_ip: str = Form(...), versio
         # Redirect immediately to status page, the update will happen in background
         return RedirectResponse(url="/status", status_code=302)
     except Exception as e:
-        print(f"Error updating device {device_ip} to PIF version {version}: {str(e)}")
+        print(f"Error updating device {device_ip} to PlayIntegrityFork version {version}: {str(e)}")
         update_in_progress = False
         current_progress = 0
-        return RedirectResponse(url="/status?error=PIF update failed", status_code=302)
+        return RedirectResponse(url="/status?error=PlayIntegrityFork update failed", status_code=302)
 
 # New function to install PIF module with progress updates
 async def install_pif_module_with_progress(device_ip: str, pif_module_path=None):
-    """Installs PIF module with progress updates for the UI"""
+    """Installs PlayIntegrityFork module with progress updates for the UI"""
     global update_in_progress, current_progress
     
     try:
         device_id = format_device_id(device_ip)
-        print(f"Starting PIF module installation for {device_ip}")
+        print(f"Starting PlayIntegrityFork module installation for {device_ip}")
         
         # Make sure ADB connection is established
         update_progress(65)
@@ -3222,7 +3251,7 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         
         # Check if module exists
         if pif_module_path is None or not Path(pif_module_path).exists():
-            print(f"PIF module not found at {pif_module_path}")
+            print(f"PlayIntegrityFork module not found at {pif_module_path}")
             update_in_progress = False
             current_progress = 0
             return
@@ -3230,7 +3259,7 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         # Extract version from filename
         version = "unknown"
         filename = Path(pif_module_path).name
-        version_match = re.search(r'PlayIntegrityFix_v?(\d+\.\d+)', filename)
+        version_match = re.search(r'v?(\d+\.\d+)', filename)
         if version_match:
             version = version_match.group(1)
         
@@ -3238,11 +3267,19 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         device_details = get_device_details(device_ip)
         device_name = device_details.get("display_name", device_ip.split(":")[0])
 
-        # Connect and remove old module
+        # Connect and remove old modules - BOTH PlayIntegrityFix AND PlayIntegrityFork
         update_progress(70)
         subprocess.run(["adb", "connect", device_ip], check=True, timeout=10)
+        
+        # Remove PlayIntegrityFix (old module)
         subprocess.run(
             ["adb", "-s", device_ip, "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfix'"],
+            timeout=15
+        )
+        
+        # Also remove PlayIntegrityFork (in case of previous installation)
+        subprocess.run(
+            ["adb", "-s", device_ip, "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfork'"],
             timeout=15
         )
         
@@ -3272,7 +3309,7 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         
         # Push and install module
         update_progress(82)
-        print(f"Pushing PIF module to {device_ip}")
+        print(f"Pushing PlayIntegrityFork module to {device_ip}")
         subprocess.run(
             ["adb", "connect", device_ip], 
             check=True, 
@@ -3287,7 +3324,7 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         )
         
         update_progress(85)
-        print(f"Installing PIF module on {device_ip}")
+        print(f"Installing PlayIntegrityFork module on {device_ip}")
         subprocess.run(
             ["adb", "-s", device_ip, "shell", 
              "su -c 'magisk --install-module /data/local/tmp/pif.zip'"],
@@ -3303,16 +3340,16 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         
         # Final reboot
         update_progress(95)
-        print(f"Final reboot for {device_ip} to apply PIF module")
+        print(f"Final reboot for {device_ip} to apply PlayIntegrityFork module")
         subprocess.run(["adb", "-s", device_ip, "reboot"], check=True, timeout=60)
 
         # Clear caches
         device_status_cache.clear()
         get_device_details.cache_clear()
-        print(f"PIF update complete for {device_ip} – device details cache cleared")
+        print(f"PlayIntegrityFork update complete for {device_ip} – device details cache cleared")
 
         # Send notification
-        await notify_update_installed(device_name, device_ip, "PlayIntegrityFix", version)
+        await notify_update_installed(device_name, device_ip, "PlayIntegrityFork", version)
         
         # Send WebSocket update
         status_data = await get_status_data()
@@ -3325,7 +3362,7 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         current_progress = 0
     
     except Exception as e:
-        print(f"PIF Installation error for {device_ip}: {str(e)}")
+        print(f"PlayIntegrityFork Installation error for {device_ip}: {str(e)}")
         traceback.print_exc()
         update_in_progress = False
         current_progress = 0
@@ -3520,7 +3557,7 @@ async def restart_apps(request: Request, device_ip: str = Form(...)):
         return redirect
     
     try:
-        # Formatiere Geräte-ID korrekt (fügt Port hinzu, falls nötig)
+        # Format device ID correctly (adds port if needed)
         device_id = format_device_id(device_ip)
         
         # Get device details for notification
@@ -3567,7 +3604,7 @@ def reboot_device(request: Request, device_ip: str = Form(...)):
         return redirect
     
     try:
-        # Formatiere Geräte-ID korrekt (fügt Port hinzu, falls nötig)
+        # Format device ID correctly (adds port if needed)
         device_id = format_device_id(device_ip)
         
         # Get device details for notification
