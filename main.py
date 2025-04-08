@@ -1985,7 +1985,7 @@ async def pif_update_task():
 
         await asyncio.sleep(3 * 3600)  # Repeat every 3 hours
 
-# Updated install_pif_module function to handle transition from PlayIntegrityFix to PlayIntegrityFork
+# Updated install_pif_module function with longer wait time and post-fs-data.sh modification
 async def install_pif_module(device_ip: str, pif_module_path=None):
     print(f"Starting PlayIntegrityFork module installation for {device_ip}")
     try:
@@ -2036,9 +2036,9 @@ async def install_pif_module(device_ip: str, pif_module_path=None):
         
         subprocess.run(["adb", "-s", device_ip, "reboot"], check=True, timeout=60)
         
-        # Wait for device to come back
-        print(f"Device {device_ip} rebooting. Waiting for it to come back online...")
-        await asyncio.sleep(120)
+        # Wait for device to come back - INCREASED TO 3 MINUTES
+        print(f"Device {device_ip} rebooting. Waiting for it to come back online (3 minutes)...")
+        await asyncio.sleep(180)  # Changed from 120 to 180 seconds (3 minutes)
         
         # Push and install module
         print(f"Pushing PlayIntegrityFork module to {device_ip}")
@@ -2060,6 +2060,54 @@ async def install_pif_module(device_ip: str, pif_module_path=None):
             ["adb", "-s", device_ip, "shell", "rm /data/local/tmp/pif.zip"],
             timeout=15
         )
+        
+        # ADDED: Modify post-fs-data.sh to change ro.adb.secure from 1 to 0
+        print(f"Modifying post-fs-data.sh to set ro.adb.secure=0")
+        
+        # First check if the file exists (it might be in either directory)
+        check_file_cmd = f'adb -s {device_ip} shell "su -c \'[ -f /data/adb/modules/playintegrityfix/post-fs-data.sh ] && echo exists\'"'
+        check_result = subprocess.run(check_file_cmd, shell=True, capture_output=True, text=True, timeout=10)
+        
+        if "exists" in check_result.stdout:
+            # The file exists, now modify it
+            print(f"Found post-fs-data.sh in playintegrityfix directory, modifying...")
+            
+            # Use sed to replace the line
+            modify_cmd = f'adb -s {device_ip} shell "su -c \'sed -i \'s/resetprop_if_diff ro.adb.secure 1/resetprop_if_diff ro.adb.secure 0/g\' /data/adb/modules/playintegrityfix/post-fs-data.sh\'"'
+            modify_result = subprocess.run(modify_cmd, shell=True, capture_output=True, text=True, timeout=15)
+            
+            # Verify the change was made
+            verify_cmd = f'adb -s {device_ip} shell "su -c \'grep \"ro.adb.secure 0\" /data/adb/modules/playintegrityfix/post-fs-data.sh\'"'
+            verify_result = subprocess.run(verify_cmd, shell=True, capture_output=True, text=True, timeout=10)
+            
+            if "ro.adb.secure 0" in verify_result.stdout:
+                print(f"Successfully modified post-fs-data.sh - ADB will remain accessible")
+            else:
+                print(f"Failed to modify post-fs-data.sh, ADB might be disabled after reboot")
+        else:
+            # Check alternative location
+            alt_check_cmd = f'adb -s {device_ip} shell "su -c \'[ -f /data/adb/modules/playintegrityfork/post-fs-data.sh ] && echo exists\'"'
+            alt_check_result = subprocess.run(alt_check_cmd, shell=True, capture_output=True, text=True, timeout=10)
+            
+            if "exists" in alt_check_result.stdout:
+                print(f"Found post-fs-data.sh in playintegrityfork directory, modifying...")
+                
+                # Use sed to replace the line in the alternative location
+                alt_modify_cmd = f'adb -s {device_ip} shell "su -c \'sed -i \'s/resetprop_if_diff ro.adb.secure 1/resetprop_if_diff ro.adb.secure 0/g\' /data/adb/modules/playintegrityfork/post-fs-data.sh\'"'
+                subprocess.run(alt_modify_cmd, shell=True, capture_output=True, text=True, timeout=15)
+                
+                # Verify the change
+                alt_verify_cmd = f'adb -s {device_ip} shell "su -c \'grep \"ro.adb.secure 0\" /data/adb/modules/playintegrityfork/post-fs-data.sh\'"'
+                alt_verify_result = subprocess.run(alt_verify_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                
+                if "ro.adb.secure 0" in alt_verify_result.stdout:
+                    print(f"Successfully modified post-fs-data.sh in alternate location - ADB will remain accessible")
+                else:
+                    print(f"Failed to modify post-fs-data.sh in alternate location")
+            else:
+                print(f"post-fs-data.sh file not found in either location. Continuing without modification.")
+        
+        # Final reboot
         print(f"Rebooting {device_ip} to apply PlayIntegrityFork module")
         subprocess.run(["adb", "-s", device_ip, "reboot"], check=True, timeout=60)
 
@@ -2071,14 +2119,18 @@ async def install_pif_module(device_ip: str, pif_module_path=None):
     
     except Exception as e:
         print(f"PlayIntegrityFork Installation error for {device_ip}: {str(e)}")
+        traceback.print_exc()
     
     except subprocess.CalledProcessError as e:
         print(f"PlayIntegrityFork Installation failed for {device_ip}: {str(e)}")
     except subprocess.TimeoutExpired as e:
         print(f"Timeout during PlayIntegrityFork install on {device_ip}: {str(e)}")
     finally:
-        subprocess.run(["adb", "connect", device_ip], timeout=5)
-
+        try:
+            subprocess.run(["adb", "connect", device_ip], timeout=5)
+        except:
+            pass
+        
 def parse_version(v: str):
     """
     Parses a version string (e.g. "1.2.3" or "v1.2.3") into a tuple of integers.
