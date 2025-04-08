@@ -1839,9 +1839,9 @@ async def get_pif_versions_for_ui():
     versions.sort(key=lambda x: parse_version(x["version"]), reverse=True)
     return versions
 
-# Update PIF update task to respect the auto-update setting
+# Update PIF update task to auto-migrate from Fix to Fork
 async def pif_update_task():
-    """Checks and installs PIF updates, considering already installed versions"""
+    """Checks and installs PIF updates, including migration from Fix to Fork"""
     last_checked_version = "0.0"  # Track the last version we checked to avoid redundant notifications
     
     while True:
@@ -1904,32 +1904,45 @@ async def pif_update_task():
                             continue
                             
                         # Check which module is installed (Fix or Fork)
-                        if "Legacy" in installed_version:
+                        if "Legacy" in installed_version or "Fix" in installed_version:
                             # Old PlayIntegrityFix found, needs update to Fork
-                            print(f"🔄 Device {ip} has legacy PlayIntegrityFix module, updating to PlayIntegrityFork")
+                            print(f"🔄 Device {ip} has legacy PlayIntegrityFix module, migrating to PlayIntegrityFork")
                             devices_to_update.append(ip)
                             continue
                         
                         # Extract version number from the Fork module version string
                         if "Fork" in installed_version:
-                            version_match = re.search(r'Fork\s+(\d+\.\d+(?:\.\d+)?)', installed_version)
+                            version_match = re.search(r'Fork\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_version)
                             if version_match:
                                 current_version = version_match.group(1)
                                 print(f"🔍 Current PlayIntegrityFork version on {ip}: {current_version}, available: {new_version}")
                                 
-                                # Compare versions
-                                installed_version_tuple = parse_version(current_version)
-                                new_version_tuple = parse_version(new_version)
-                                
-                                if not installed_version_tuple or not new_version_tuple:
-                                    print(f"⚠️ Invalid version format for comparison on {ip}")
-                                    continue
+                                # Compare versions - handle numeric versions and various formats
+                                # For simple number versions like "12" vs "13"
+                                try:
+                                    # Try simple numeric comparison first (for formats like "12" vs "13")
+                                    current_num = int(re.search(r'(\d+)', current_version).group(1))
+                                    new_num = int(re.search(r'(\d+)', new_version).group(1))
                                     
-                                if installed_version_tuple < new_version_tuple:
-                                    print(f"🚨 Update needed for {ip}! Installed: {current_version}, Available: {new_version}")
-                                    devices_to_update.append(ip)
-                                else:
-                                    print(f"✅ Device {ip} already has latest PlayIntegrityFork version, skipping update.")
+                                    if current_num < new_num:
+                                        print(f"🚨 Update needed for {ip}! Installed: {current_version}, Available: {new_version}")
+                                        devices_to_update.append(ip)
+                                    else:
+                                        print(f"✅ Device {ip} already has latest PlayIntegrityFork version, skipping update.")
+                                except (ValueError, AttributeError):
+                                    # Fallback to more complex version comparison
+                                    installed_version_tuple = parse_version(current_version)
+                                    new_version_tuple = parse_version(new_version)
+                                    
+                                    if not installed_version_tuple or not new_version_tuple:
+                                        print(f"⚠️ Invalid version format for comparison on {ip}")
+                                        continue
+                                        
+                                    if installed_version_tuple < new_version_tuple:
+                                        print(f"🚨 Update needed for {ip}! Installed: {current_version}, Available: {new_version}")
+                                        devices_to_update.append(ip)
+                                    else:
+                                        print(f"✅ Device {ip} already has latest PlayIntegrityFork version, skipping update.")
                             else:
                                 print(f"⚠️ Could not parse version from {installed_version} on {ip}, scheduling update")
                                 devices_to_update.append(ip)
