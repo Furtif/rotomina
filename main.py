@@ -157,7 +157,7 @@ async def send_discord_notification(message: str, title: str = None, color: int 
             "title": title or "Rotomina Notification",
             "description": message,
             "color": color,
-            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "footer": {
                 "text": "Rotomina"
             }
