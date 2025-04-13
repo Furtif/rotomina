@@ -1,676 +1,454 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rotomina - Status</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.3.min.js"></script>
-    
-    <style>
-        /* Improved dark color palette */
-        :root {
-            --bs-body-bg: #0f0f0f;               /* Darker base background */
-            --bs-body-color: #e0e0e0;            /* Text color */
-            --bs-card-bg: #1a1a1a;               /* Lighter card color */
-            --bs-card-border-color: #2c2c2c;     /* Subtle card borders */
-            --bs-table-bg: #1a1a1a;              /* Table background */
-            --bs-table-color: #e0e0e0;           /* Table text color */
-            --bs-table-striped-bg: #242424;      /* Slightly lighter stripes */
-            --bs-table-striped-color: #e0e0e0;   /* Stripe text color */
-            --bs-modal-bg: #1a1a1a;              /* Modal background */
-            --bs-modal-color: #e0e0e0;           /* Modal text color */
-            --bs-border-color: #333;             /* Border color for tables */
-            --bs-secondary-bg: #242424;          /* Secondary background */
-            --bs-btn-bg: #2d2d2d;                /* Standard button background */
-            --bs-btn-hover-bg: #3a3a3a;          /* Hover background for buttons */
-        }
-        
-        body {
-            background-color: var(--bs-body-bg);
-            color: var(--bs-body-color);
-        }
-        
-        /* Card styling */
-        .card {
-            background-color: var(--bs-card-bg);
-            border-color: var(--bs-card-border-color);
-            border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-            margin-bottom: 1.5rem;
-        }
-        
-        .card-header {
-            background-color: rgba(0, 0, 0, 0.15);
-            border-bottom: 1px solid var(--bs-card-border-color);
-            padding: 1rem 1.25rem;
-        }
-        
-        /* Table styling */
-        .table {
-            color: var(--bs-table-color);
-            border-color: var(--bs-border-color);
-        }
-        
-        .table-striped > tbody > tr:nth-of-type(odd) {
-            background-color: var(--bs-table-bg);
-        }
-        
-        .table-striped > tbody > tr:nth-of-type(even) {
-            background-color: var(--bs-table-striped-bg);
-        }
-        
-        .table td, .table th {
-            border-color: var(--bs-border-color);
-            padding: 0.75rem;
-            vertical-align: middle;
-        }
-        
-        /* Improved table separators */
-        .table-striped {
-            border-collapse: separate;
-            border-spacing: 0;
-        }
-        
-        .table-striped thead th {
-            background-color: rgba(0, 0, 0, 0.2);
-            border-bottom: 2px solid var(--bs-border-color);
-            color: #fff;
-        }
-        
-        /* Button styling */
-        .btn-outline-primary {
-            color: #6ea8fe;
-            background-color: var(--bs-btn-bg);
-            border-color: #6ea8fe;
-        }
-        
-        .btn-outline-primary:hover {
-            color: #fff;
-            background-color: #0d6efd;
-            border-color: #0d6efd;
-        }
-        
-        .btn-primary {
-            background-color: #0d6efd;
-            border-color: #0a58ca;
-        }
-        
-        .btn-secondary {
-            background-color: var(--bs-btn-bg);
-            border-color: #565e64;
-        }
-        
-        .btn-secondary:hover {
-            background-color: var(--bs-btn-hover-bg);
-        }
-        
-        /* Custom outline button styles */
-        .btn-outline-warning {
-            color: #ffc107;
-            border-color: #ffc107;
-            background-color: var(--bs-btn-bg);
-        }
-        
-        .btn-outline-warning:hover {
-            color: #000;
-            background-color: #ffc107;
-            border-color: #ffc107;
-        }
-        
-        .btn-outline-danger {
-            color: #dc3545;
-            border-color: #dc3545;
-            background-color: var(--bs-btn-bg);
-        }
-        
-        .btn-outline-danger:hover {
-            color: #fff;
-            background-color: #dc3545;
-            border-color: #dc3545;
-        }
-        
-        /* Status badges */
-        .badge {
-            padding: 0.4em 0.65em;
-            font-weight: 500;
-            border-radius: 4px;
-        }
-        
-        /* Dropdown menu styling */
-        .dropdown-menu {
-            background-color: #2a2a2a;
-            border-color: #444;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
-            padding: 0.5rem 0;
-        }
-        
-        .dropdown-item {
-            color: #e0e0e0;
-        }
-        
-        .dropdown-item:hover {
-            background-color: #3a3a3a;
-            color: #fff;
-        }
-        
-        /* Form element styling */
-        .form-control {
-            background-color: #2a2a2a;
-            border-color: #444;
-            color: #e0e0e0;
-        }
-        
-        .form-control:focus {
-            background-color: #2a2a2a;
-            color: #e0e0e0;
-            border-color: #0d6efd;
-            box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
-        }
-        
-        .form-check-input {
-            background-color: #2a2a2a;
-            border-color: #444;
-        }
-        
-        .form-check-input:checked {
-            background-color: #0d6efd;
-            border-color: #0d6efd;
-        }
-        
-        /* Modal styling */
-        .modal-content {
-            background-color: var(--bs-modal-bg);
-            color: var(--bs-modal-color);
-            border: 1px solid #444;
-        }
-        
-        .modal-header {
-            border-bottom: 1px solid #444;
-        }
-        
-        .modal-footer {
-            border-top: 1px solid #444;
-        }
-        
-        /* Navbar styling */
-        .navbar-dark.bg-dark {
-            background-color: #131313 !important; /* Darker than the main background */
-        }
-        
-        /* Auto-refresh indicator */
-        #refreshIndicator {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            margin-left: 8px;
-            background-color: #28a745;
-            animation: pulse 2s infinite;
-        }
-        
-        /* Enhanced pulse effect */
-        @keyframes pulse {
-            0% {
-                transform: scale(0.95);
-                box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7);
-                opacity: 1;
-            }
-            70% {
-                transform: scale(1);
-                box-shadow: 0 0 0 6px rgba(40, 167, 69, 0);
-                opacity: 0.7;
-            }
-            100% {
-                transform: scale(0.95);
-                box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
-                opacity: 1;
-            }
-        }
-        
-        /* Improved text readability */
-        .text-muted {
-            color: #9e9e9e !important;
-        }
-        
-        /* Additional hover effects for rows */
-        .table-striped > tbody > tr:hover {
-            background-color: rgba(255, 255, 255, 0.05);
-        }
-        
-        /* New refresh button styles */
-        .bg-success-light {
-            background-color: rgba(40, 167, 69, 0.2) !important;
-            transition: background-color 0.5s ease;
-        }
-        
-        .refresh-icon {
-            display: inline-block;
-            font-style: normal;
-            font-weight: bold;
-            font-size: 16px;
-        }
-        
-        .spinning {
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
-        }
-        
-        /* Auto-update status labels */
-        .auto-update-status {
-            display: inline-block;
-            font-size: 0.8rem;
-            margin-left: 8px;
-            padding: 3px 8px;
-            border-radius: 12px;
-        }
-        
-        .auto-update-enabled {
-            background-color: rgba(40, 167, 69, 0.2);
-            color: #2ECC71;
-            border: 1px solid #2ECC71;
-        }
-        
-        .auto-update-disabled {
-            background-color: rgba(231, 76, 60, 0.2);
-            color: #E74C3C;
-            border: 1px solid #E74C3C;
-        }
-        
-        /* ADB Error Tooltip und Badge Styling */
-        .adb-status {
-            position: relative;
-            cursor: help;
-        }
-        
-        .adb-status .status-tooltip {
-            visibility: hidden;
-            width: 250px;
-            background-color: #1e1e1e;
-            color: #fff;
-            text-align: center;
-            border-radius: 6px;
-            padding: 8px;
-            position: absolute;
-            z-index: 1;
-            bottom: 125%;
-            left: 50%;
-            margin-left: -125px;
-            opacity: 0;
-            transition: opacity 0.3s;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-            font-size: 12px;
-            pointer-events: none;
-        }
-        
-        .adb-status .status-tooltip::after {
-            content: "";
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            margin-left: -5px;
-            border-width: 5px;
-            border-style: solid;
-            border-color: #1e1e1e transparent transparent transparent;
-        }
-        
-        .adb-status:hover .status-tooltip {
-            visibility: visible;
-            opacity: 1;
-        }
-        
-        .adb-error-badge {
-            font-size: 10px;
-            position: absolute;
-            top: -8px;
-            right: -8px;
-            padding: 3px 6px;
-            border-radius: 50%;
-            background-color: #dc3545;
-            color: #fff;
-            font-weight: bold;
-        }
+{% extends "base.html" %}
 
-        /* WebSocket connection status */
-        #websocketStatus {
-            font-size: 0.8rem;
-            padding: 2px 8px;
-            border-radius: 12px;
-            transition: all 0.3s ease;
-        }
+{% block content %}
+<div x-data="statusPage()" x-init="initWebsocket()" x-cloak>
+    <!-- Header with status information -->
+    <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold text-white">
+            Device Overview
+            <span class="relative inline-flex h-3 w-3 ml-2" :class="connection.status === 'connected' ? 'bg-green-500' : (connection.status === 'connecting' ? 'bg-yellow-500' : 'bg-red-500')" 
+                  x-tooltip="connection.status">
+                <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" 
+                      :class="connection.status === 'connected' ? 'bg-green-400' : (connection.status === 'connecting' ? 'bg-yellow-400' : 'bg-red-400')"></span>
+            </span>
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" 
+                  :class="connection.status === 'connected' ? 'bg-green-100 text-green-800' : (connection.status === 'connecting' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800')"
+                  x-text="connection.statusText"></span>
+            <span class="text-sm text-gray-400 ml-2" x-text="'Last updated: ' + lastUpdated"></span>
+        </h1>
         
-        #websocketStatus.connected {
-            background-color: rgba(40, 167, 69, 0.2);
-            color: #2ECC71;
-        }
-        
-        #websocketStatus.disconnected {
-            background-color: rgba(231, 76, 60, 0.2);
-            color: #E74C3C;
-        }
-        
-        #websocketStatus.connecting {
-            background-color: rgba(243, 156, 18, 0.2);
-            color: #F39C12;
-        }
-
-        /* Sortable table styling */
-        .sortable {
-            cursor: pointer;
-            position: relative;
-            user-select: none;
-        }
-        
-        .sortable:hover {
-            background-color: rgba(255, 255, 255, 0.1);
-        }
-        
-        .sort-icon {
-            display: inline-block;
-            width: 0;
-            height: 0;
-            margin-left: 8px;
-            vertical-align: middle;
-            content: "";
-            border: 4px solid transparent;
-        }
-        
-        .sortable.asc .sort-icon {
-            border-bottom: 4px solid #fff;
-            border-top: none;
-        }
-        
-        .sortable.desc .sort-icon {
-            border-top: 4px solid #fff;
-            border-bottom: none;
-        }
-        
-        /* Table row hover effect */
-        #deviceTable tbody tr {
-            transition: background-color 0.2s ease;
-        }
-        
-        #deviceTable tbody tr:hover {
-            background-color: rgba(255, 255, 255, 0.08) !important;
-        }
-        
-        /* Device action buttons layout */
-        .device-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.3rem;
-        }
-        
-        .device-actions .btn-group,
-        .device-actions .device-control-buttons,
-        .device-actions form,
-        .device-actions button {
-            margin-right: 0.3rem;
-            margin-bottom: 0.3rem;
-        }
-        
-        /* Consistent button widths */
-        .device-actions .btn {
-            min-width: 60px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container-fluid">
-        <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-            <div class="container-fluid">
-                <a class="navbar-brand" href="#">Rotomina</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
+        <div class="flex items-center space-x-3">
+            <form hx-post="/pogo/update" hx-target="#updateModal" hx-swap="outerHTML">
+                <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                        @click="showUpdateModal = true">
+                    <span>PoGo Update All (<span x-text="pogoLatest"></span>)</span>
                 </button>
-                <div class="collapse navbar-collapse" id="navbarNav">
-                    <ul class="navbar-nav">
-                        <li class="nav-item">
-                            <a class="nav-link active" href="/status">Status</a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="/settings">Settings</a>
-                        </li>
-                    </ul>
-                    <ul class="navbar-nav ms-auto">
-                        <li class="nav-item">
-                            <span class="nav-link">Logged in as: {{ username }}</span>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link" href="/logout">Logout</a>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-        </nav>
-
-        <div class="row mt-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 class="mb-0">
-                            Device Overview
-                            <span id="refreshIndicator" title="WebSocket status"></span>
-                            <span id="websocketStatus" class="connecting">Connecting...</span>
-                            <small class="text-muted ms-2" id="lastUpdated"></small>
-                        </h5>
-                        <div>
-                            <form method="post" action="/pogo/update" style="display: inline-block;">
-                                <button type="submit" class="btn btn-primary" id="updateButton">
-                                    PoGo Update All ({{ pogo_latest }})
-                                    <span id="pogoAutoStatus" class="auto-update-status {% if config.pogo_auto_update_enabled %}auto-update-enabled{% else %}auto-update-disabled{% endif %}">
-                                        Auto: {% if config.pogo_auto_update_enabled %}ON{% else %}OFF{% endif %}
-                                    </span>
-                                </button>
-                            </form>
-                            <button type="button" class="btn btn-secondary ms-2" id="refreshBtn">Refresh</button>
-                        </div>
-                    </div>
-                    <div class="card-body">
-                        <div class="row mb-2">
-                            <div class="col-12">
-                                <div class="d-flex justify-content-end align-items-center">
-                                    <div class="me-4">
-                                        <span class="badge rounded-pill {% if config.pif_auto_update_enabled %}bg-success{% else %}bg-danger{% endif %} me-2">
-                                            PIF Updates: {% if config.pif_auto_update_enabled %}Automatic{% else %}Manual{% endif %}
-                                        </span>
-                                        <span class="badge rounded-pill {% if config.pogo_auto_update_enabled %}bg-success{% else %}bg-danger{% endif %}">
-                                            PoGO Updates: {% if config.pogo_auto_update_enabled %}Automatic{% else %}Manual{% endif %}
-                                        </span>
+            </form>
+            
+            <button type="button" @click="refreshData()" class="inline-flex items-center px-4 py-2 border border-gray-700 text-sm font-medium rounded-md text-gray-200 bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" :class="{ 'animate-spin': isRefreshing }">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Refresh
+            </button>
+        </div>
+    </div>
+    
+    <!-- Update status indicators -->
+    <div class="flex justify-end mb-4">
+        <div class="space-x-2">
+            <span class="inline-flex items-center px-3 py-1 rounded-md text-sm font-medium" 
+                  :class="pifAutoUpdateEnabled ? 'bg-green-900/30 text-green-400 border border-green-700' : 'bg-red-900/30 text-red-400 border border-red-700'">
+                PIF Updates: <span x-text="pifAutoUpdateEnabled ? 'Automatic' : 'Manual'" class="ml-1"></span>
+            </span>
+            
+            <span class="inline-flex items-center px-3 py-1 rounded-md text-sm font-medium" 
+                  :class="pogoAutoUpdateEnabled ? 'bg-green-900/30 text-green-400 border border-green-700' : 'bg-red-900/30 text-red-400 border border-red-700'">
+                PoGO Updates: <span x-text="pogoAutoUpdateEnabled ? 'Automatic' : 'Manual'" class="ml-1"></span>
+            </span>
+        </div>
+    </div>
+    
+    <!-- Devices table -->
+    <div class="bg-dark-800 overflow-hidden shadow rounded-lg">
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-700">
+                <thead class="bg-dark-800">
+                    <tr>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('name')">
+                            Name
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'name' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'name'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('ip')">
+                            IP / ID
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'ip' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'ip'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('adb')">
+                            ADB
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'adb' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'adb'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('alive')">
+                            Alive
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'alive' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'alive'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('control')">
+                            Control
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'control' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'control'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('pogo')">
+                            PoGo
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'pogo' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'pogo'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('mitm')">
+                            MITM
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'mitm' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'mitm'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('module')">
+                            PIF
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'module' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'module'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('memory')">
+                            Memory
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'memory' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'memory'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">
+                            Actions
+                        </th>
+                    </tr>
+                </thead>
+                <tbody class="bg-dark-800 divide-y divide-gray-700">
+                    <template x-for="device in sortedDevices" :key="device.ip">
+                        <tr class="hover:bg-gray-800/70 transition-colors">
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-100" x-text="device.display_name"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300" x-text="device.ip.includes(':') ? device.ip.split(':')[0] : device.ip"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                <div class="relative group">
+                                    <template x-if="device.status">
+                                        <span class="text-green-500">✅</span>
+                                    </template>
+                                    <template x-if="!device.status">
+                                        <div>
+                                            <span class="text-red-500 relative">❌</span>
+                                            <template x-if="device.adb_error">
+                                                <span class="absolute -top-2 -right-2 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-xs text-white">!</span>
+                                            </template>
+                                        </div>
+                                    </template>
+                                    <template x-if="device.adb_error">
+                                        <div class="absolute z-10 invisible group-hover:visible bg-gray-900 text-white text-xs rounded py-1 px-2 -mt-16 ml-4 w-56">
+                                            <span x-text="device.adb_error"></span>
+                                        </div>
+                                    </template>
+                                </div>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                <span x-text="device.is_alive ? '✅' : '❌'" :class="device.is_alive ? 'text-green-500' : 'text-red-500'"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                <span class="px-2 py-1 text-xs rounded-full" :class="device.control_enabled ? 'bg-green-900/50 text-green-400' : 'bg-gray-800 text-gray-400'" x-text="device.control_enabled ? 'Active' : 'Inactive'"></span>
+                            </td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300" x-text="device.pogo"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300" x-text="device.mitm"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300" x-text="device.module"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300" x-text="formatMemory(device.mem_free)"></td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm font-medium flex flex-wrap gap-2">
+                                <div class="dropdown" x-data="{ open: false }">
+                                    <button @click="open = !open" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-100 rounded-md text-xs border border-gray-600 flex items-center" type="button">
+                                        PoGo
+                                        <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                        </svg>
+                                    </button>
+                                    <div x-show="open" @click.away="open = false" class="origin-top-right absolute mt-2 w-48 rounded-md shadow-lg bg-gray-900 ring-1 ring-black ring-opacity-5 z-10">
+                                        <div class="py-1 divide-y divide-gray-700">
+                                            <form hx-post="/pogo/device-update" hx-target="#updateModal" hx-swap="outerHTML">
+                                                <input type="hidden" name="device_ip" :value="device.ip">
+                                                <input type="hidden" name="version" :value="pogoLatest">
+                                                <button type="submit" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 w-full text-left" x-text="pogoLatest" @click="showUpdateModal = true"></button>
+                                            </form>
+                                            <form hx-post="/pogo/device-update" hx-target="#updateModal" hx-swap="outerHTML">
+                                                <input type="hidden" name="device_ip" :value="device.ip">
+                                                <input type="hidden" name="version" :value="pogoPrevious">
+                                                <button type="submit" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 w-full text-left" x-text="pogoPrevious" @click="showUpdateModal = true"></button>
+                                            </form>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table table-striped" id="deviceTable">
-                                <thead>
-                                    <tr>
-                                        <th class="sortable" data-sort="text">Name <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="text">IP / ID <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="status">ADB <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="status">Alive <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="status">Control <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="version">PoGo <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="version">MITM <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="version">PIF <span class="sort-icon"></span></th>
-                                        <th class="sortable" data-sort="memory">Memory <span class="sort-icon"></span></th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {% for device in devices %}
-                                    <tr data-device-ip="{{ device.ip }}">
-                                        <td>{{ device.display_name }}</td>
-                                        <td>{{ device.ip.split(':')[0] if ':' in device.ip else device.ip }}</td>
-                                        <td>
-                                            <div class="adb-status">
-                                                {% if device.status %}
-                                                    <span class="text-success">✅</span>
-                                                {% else %}
-                                                    <span class="text-danger position-relative">
-                                                        ❌
-                                                        {% if device.adb_error %}
-                                                            <span class="adb-error-badge">!</span>
-                                                        {% endif %}
-                                                    </span>
-                                                    {% if device.adb_error %}
-                                                        <span class="status-tooltip">
-                                                            {{ device.adb_error }}
-                                                        </span>
-                                                    {% endif %}
-                                                {% endif %}
+                                
+                                <!-- Updated Module Dropdown -->
+                                <div class="dropdown" x-data="{ open: false, versions: [], moduleType: 'all' }" x-init="fetchAllModuleVersions()">
+                                    <button @click="open = !open" class="px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-100 rounded-md text-xs border border-gray-600 flex items-center" type="button">
+                                        Module
+                                        <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                        </svg>
+                                    </button>
+                                    <div x-show="open" @click.away="open = false" class="origin-top-right absolute mt-2 w-72 rounded-md shadow-lg bg-gray-900 ring-1 ring-black ring-opacity-5 z-10">
+                                        <div class="py-2 px-2">
+                                            <!-- Filter tabs -->
+                                            <div class="flex border-b border-gray-700 mb-2 pb-2">
+                                                <button @click="moduleType = 'all'" 
+                                                        class="px-3 py-1 text-xs rounded-md mr-1 flex-1"
+                                                        :class="moduleType === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'">
+                                                    All Modules
+                                                </button>
+                                                <button @click="moduleType = 'fork'" 
+                                                        class="px-3 py-1 text-xs rounded-md mr-1 flex-1"
+                                                        :class="moduleType === 'fork' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'">
+                                                    Fork
+                                                </button>
+                                                <button @click="moduleType = 'fix'" 
+                                                        class="px-3 py-1 text-xs rounded-md flex-1"
+                                                        :class="moduleType === 'fix' ? 'bg-blue-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'">
+                                                    Fix
+                                                </button>
                                             </div>
-                                        </td>
-                                        <td class="is-alive">{{ device.is_alive|safe }}</td>
-                                        <td>
-                                            {% if device.control_enabled %}
-                                            <span class="badge bg-success">Active</span>
-                                            {% else %}
-                                            <span class="badge bg-secondary">Inactive</span>
-                                            {% endif %}
-                                        </td>
-                                        <td class="pogo-version">{{ device.pogo }}</td>
-                                        <td class="mitm-version">{{ device.mitm }}</td>
-                                        <td class="module-version">{{ device.module }}</td>
-                                        <td class="device-memory">{{ device.mem_free|format_memory }}</td>
-                                        <td>
-                                            <div class="device-actions">
-                                                <div class="btn-group">
-                                                    <button type="button" class="btn btn-sm btn-outline-primary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                                                        PoGo
-                                                    </button>
-                                                    <ul class="dropdown-menu dropdown-menu-dark">
-                                                        <li>
-                                                            <form method="post" action="/pogo/device-update">
-                                                                <input type="hidden" name="device_ip" value="{{ device.ip }}">
-                                                                <input type="hidden" name="version" value="{{ pogo_latest }}">
-                                                                <button type="submit" class="dropdown-item">{{ pogo_latest }}</button>
-                                                            </form>
-                                                        </li>
-                                                        <li>
-                                                            <form method="post" action="/pogo/device-update">
-                                                                <input type="hidden" name="device_ip" value="{{ device.ip }}">
-                                                                <input type="hidden" name="version" value="{{ pogo_previous }}">
-                                                                <button type="submit" class="dropdown-item">{{ pogo_previous }}</button>
-                                                            </form>
-                                                        </li>
-                                                    </ul>
+                                            
+                                            <div class="max-h-60 overflow-y-auto divide-y divide-gray-700">
+                                                <template x-for="version in filteredVersions()" :key="`${version.module_type}-${version.version}`">
+                                                    <form hx-post="/pif/device-update" hx-target="#updateModal" hx-swap="outerHTML">
+                                                        <input type="hidden" name="device_ip" :value="device.ip">
+                                                        <input type="hidden" name="version" :value="version.version">
+                                                        <input type="hidden" name="module_type" :value="version.module_type">
+                                                        <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-800 transition-colors" @click="showUpdateModal = true">
+                                                            <div class="flex justify-between items-center">
+                                                                <div>
+                                                                    <span class="text-white font-medium" x-text="version.name"></span>
+                                                                    <span class="text-xs text-gray-500 ml-1" x-text="formatDate(version.published_at)"></span>
+                                                                </div>
+                                                                <span class="px-1.5 py-0.5 text-xs rounded" 
+                                                                      :class="version.module_type === 'fork' ? 'bg-blue-900/40 text-blue-300 border border-blue-800' : 'bg-yellow-900/40 text-yellow-300 border border-yellow-800'"
+                                                                      x-text="version.module_type === 'fork' ? 'Fork' : 'Fix'"></span>
+                                                            </div>
+                                                        </button>
+                                                    </form>
+                                                </template>
+                                                <div x-show="filteredVersions().length === 0" class="px-4 py-2 text-sm text-gray-500 text-center">
+                                                    <template x-if="versions.length === 0">Loading versions...</template>
+                                                    <template x-if="versions.length > 0">No versions found</template>
                                                 </div>
-                                                
-                                                <div class="btn-group">
-                                                    <button type="button" class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
-                                                        PIF
-                                                    </button>
-                                                    <ul class="dropdown-menu dropdown-menu-dark pif-versions-dropdown" data-device-ip="{{ device.ip }}">
-                                                        <li><div class="dropdown-item text-center">Loading versions...</div></li>
-                                                    </ul>
-                                                </div>
-                                                                                                
-                                                <form action="/devices/restart-apps" method="post">
-                                                    <input type="hidden" name="device_ip" value="{{ device.ip }}">
-                                                    <button type="submit" class="btn btn-sm btn-outline-warning" 
-                                                            onclick="return confirm('Restart apps on {{ device.display_name }}?')" 
-                                                            title="Restart Apps">
-                                                        Restart
-                                                    </button>
-                                                </form>
-                                                
-                                                <form action="/devices/reboot" method="post">
-                                                    <input type="hidden" name="device_ip" value="{{ device.ip }}">
-                                                    <button type="submit" class="btn btn-sm btn-outline-danger" 
-                                                            onclick="return confirm('Reboot device {{ device.display_name }}?')" 
-                                                            title="Reboot Device">
-                                                        Reboot
-                                                    </button>
-                                                </form>
                                             </div>
-                                        </td>
-                                    </tr>
-                                    {% endfor %}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <form hx-post="/devices/restart-apps" hx-target="closest tr" hx-confirm="Restart apps on this device?">
+                                    <input type="hidden" name="device_ip" :value="device.ip">
+                                    <button type="submit" class="px-3 py-1 bg-yellow-900/30 hover:bg-yellow-900/50 text-yellow-500 border border-yellow-700 rounded-md text-xs">
+                                        Restart
+                                    </button>
+                                </form>
+                                
+                                <form hx-post="/devices/reboot" hx-confirm="Reboot this device? This will take some time.">
+                                    <input type="hidden" name="device_ip" :value="device.ip">
+                                    <button type="submit" class="px-3 py-1 bg-red-900/30 hover:bg-red-900/50 text-red-500 border border-red-700 rounded-md text-xs">
+                                        Reboot
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
         </div>
     </div>
-
-    <!-- Modal for update status -->
-    <div class="modal fade" id="updateModal" tabindex="-1" aria-labelledby="updateModalLabel" aria-hidden="true">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="updateModalLabel">Update in progress...</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="progress">
-                        <div id="updateProgress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
-                    </div>
-                    <p id="updateMessage" class="mt-2 text-center">Please wait...</p>
+    
+    <!-- Update progress modal -->
+    <div id="updateModal" x-show="showUpdateModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50" x-cloak>
+        <div class="bg-dark-800 rounded-lg shadow-xl max-w-md w-full p-6" @click.away="showUpdateModal = false">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-medium text-gray-100">Update in progress...</h3>
+                <button @click="showUpdateModal = false" class="text-gray-400 hover:text-gray-200">
+                    <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="mb-4">
+                <div class="overflow-hidden h-2 text-xs flex rounded bg-gray-700">
+                    <div class="w-0 flex-none h-full flex justify-center bg-blue-500 transition-all duration-300 ease-out" :style="{ width: updateProgress + '%' }"></div>
                 </div>
             </div>
+            <p class="text-center text-gray-300">Please wait, this may take a few minutes...</p>
         </div>
     </div>
+</div>
 
-    <script>
-        let socket;
-        let reconnectInterval;
-        let isConnected = false;
-        let updateModal;
-
-        $(document).ready(function() {
-            updateModal = new bootstrap.Modal(document.getElementById('updateModal'));
+<script>
+// Alpine.js component for status page
+function statusPage() {
+    return {
+        devices: [],
+        sortedDevices: [],
+        pogoLatest: "{{ pogo_latest }}",
+        pogoPrevious: "{{ pogo_previous }}",
+        pogoAutoUpdateEnabled: {% if config.pogo_auto_update_enabled %}true{% else %}false{% endif %},
+        pifAutoUpdateEnabled: {% if config.pif_auto_update_enabled %}true{% else %}false{% endif %},
+        lastUpdated: new Date().toLocaleTimeString(),
+        isRefreshing: false,
+        showUpdateModal: false,
+        updateProgress: 0,
+        sortConfig: {
+            key: 'name',
+            direction: 'asc'
+        },
+        connection: {
+            status: 'connecting',
+            statusText: 'Connecting...'
+        },
+        socket: null,
+        
+        // Initialize websocket connection
+        initWebsocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/status`;
             
-            // Set last updated time
-            updateLastUpdatedTime();
+            console.log('Initializing WebSocket connection to:', wsUrl);
             
-            // Initialize WebSocket connection
-            setupWebSocket();
+            // Create a raw WebSocket connection (not using HTMX WebSocket extension)
+            this.socket = new WebSocket(wsUrl);
             
-            // Refresh button - send WebSocket refresh command
-            $("#refreshBtn").click(function() {
-                if (socket && socket.readyState === WebSocket.OPEN) {
-                    socket.send("refresh");
-                    console.log("Sent refresh command via WebSocket");
-                } else {
-                    console.log("WebSocket not connected, attempting to reconnect");
-                    setupWebSocket();
+            this.socket.onopen = () => {
+                console.log('WebSocket connection established');
+                this.connection.status = 'connected';
+                this.connection.statusText = 'Connected';
+                
+                // Initial request for data
+                this.socket.send('refresh');
+            };
+            
+            this.socket.onmessage = (event) => {
+                try {
+                    console.log('WebSocket message received');
+                    const data = JSON.parse(event.data);
+                    this.updateData(data);
+                } catch (e) {
+                    console.error('Error parsing WebSocket message:', e);
                 }
-            });
-
-            // Update button click
-            $("#updateButton").click(function() {
-                updateModal.show();
-            });
-
-            // Individual device update buttons
-            $(".dropdown-item").click(function() {
-                updateModal.show();
-            });
-        });
-
-        function updateLastUpdatedTime() {
-            const now = new Date();
-            $("#lastUpdated").text(`Last updated: ${now.toLocaleTimeString()}`);
-        }
-
-        // Format memory for display
-        function formatMemory(memKB) {
+            };
+            
+            this.socket.onclose = () => {
+                console.log('WebSocket connection closed');
+                this.connection.status = 'disconnected';
+                this.connection.statusText = 'Disconnected';
+                
+                // Set up AJAX polling as fallback
+                this.startAjaxPolling();
+                
+                // Try to reconnect after a delay
+                setTimeout(() => {
+                    if (this.connection.status === 'disconnected') {
+                        console.log('Attempting to reconnect WebSocket...');
+                        this.initWebsocket();
+                    }
+                }, 5000);
+            };
+            
+            this.socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                this.connection.status = 'disconnected';
+                this.connection.statusText = 'Error';
+                
+                // Switch to AJAX polling on error
+                this.startAjaxPolling();
+            };
+            
+            // Add a timeout to switch to AJAX if WebSocket doesn't connect
+            setTimeout(() => {
+                if (this.connection.status === 'connecting') {
+                    console.log('WebSocket connection timed out, switching to AJAX polling');
+                    this.connection.statusText = 'Using AJAX';
+                    this.startAjaxPolling();
+                }
+            }, 5000);
+        },
+        
+        // AJAX polling as fallback
+        startAjaxPolling() {
+            if (this.connection.status !== 'connected') {
+                // Initial fetch
+                this.refreshData();
+                
+                // Set polling interval
+                const pollInterval = setInterval(() => {
+                    // Only continue polling if still disconnected
+                    if (this.connection.status !== 'connected') {
+                        this.refreshData();
+                    } else {
+                        // If we've reconnected, stop polling
+                        clearInterval(pollInterval);
+                    }
+                }, 30000); // Every 30 seconds
+            }
+        },
+        
+        // Refresh data using AJAX
+        refreshData() {
+            this.isRefreshing = true;
+            
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    this.updateData(data);
+                    this.isRefreshing = false;
+                })
+                .catch(error => {
+                    console.error('Error fetching data:', error);
+                    this.isRefreshing = false;
+                });
+        },
+        
+        // Update data state
+        updateData(data) {
+            this.devices = data.devices || [];
+            this.sortedDevices = [...this.devices];
+            this.pogoLatest = data.pogo_latest || "N/A";
+            this.pogoPrevious = data.pogo_previous || "N/A";
+            this.pogoAutoUpdateEnabled = data.pogo_auto_update_enabled;
+            this.pifAutoUpdateEnabled = data.pif_auto_update_enabled;
+            this.lastUpdated = new Date().toLocaleTimeString();
+            
+            // Update sort
+            this.sortTable(this.sortConfig.key, false);
+            
+            // Update progress modal if update in progress
+            if (data.update_in_progress) {
+                this.showUpdateModal = true;
+                this.updateProgress = data.update_progress;
+            } else if (this.updateProgress >= 100) {
+                // Hide modal after completion
+                setTimeout(() => {
+                    this.showUpdateModal = false;
+                    this.updateProgress = 0;
+                }, 1000);
+            }
+        },
+        
+        // Format memory value
+        formatMemory(memKB) {
             if (!memKB || memKB <= 0) {
                 return "N/A";
             }
             
             // Memory comes in KB
             if (memKB < 1024) {
-                return `${memKB.toFixed(1).replace('.', ',')} kB`;
+                return `${(memKB).toFixed(1).replace('.', ',')} kB`;
             }
             
             // Convert to MB
@@ -682,520 +460,141 @@
             // Convert to GB
             const memGB = memMB / 1024;
             return `${memGB.toFixed(2).replace('.', ',')} GB`;
-        }
-
-        function setupWebSocket() {
-            // Determine WebSocket URL based on the current HTTP URL
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws/status`;
-            
-            // Update WebSocket status indicator
-            $("#websocketStatus").removeClass("connected disconnected").addClass("connecting").text("Connecting...");
-            
-            // Create WebSocket connection
-            socket = new WebSocket(wsUrl);
-            
-            socket.onopen = function(event) {
-                console.log("WebSocket connection established");
-                isConnected = true;
-                
-                // Update connection indicator
-                $("#refreshIndicator").css('background-color', '#28a745');
-                $("#websocketStatus").removeClass("connecting disconnected").addClass("connected").text("Connected");
-                
-                // Clear any existing reconnect interval
-                if (reconnectInterval) {
-                    clearInterval(reconnectInterval);
-                    reconnectInterval = null;
-                }
-            };
-            
-            socket.onmessage = function(event) {
-                // Parse JSON data from server
-                const data = JSON.parse(event.data);
-                
-                // Update device table with new data
-                updateDeviceTable(data);
-                
-                // Update time of last update
-                updateLastUpdatedTime();
-                
-                // Update auto-update status indicators
-                updateAutoUpdateStatus(data.pif_auto_update_enabled, data.pogo_auto_update_enabled);
-                
-                // Check for update progress info
-                if (data.update_in_progress) {
-                    showUpdateProgress(data.update_progress);
-                } else if (updateModal._isShown) {
-                    // If update is complete, hide modal after a delay
-                    setTimeout(() => {
-                        updateModal.hide();
-                    }, 1000);
-                }
-            };
-            
-            socket.onclose = function(event) {
-                console.log("WebSocket connection closed");
-                isConnected = false;
-                
-                // Update connection indicator
-                $("#refreshIndicator").css('background-color', '#dc3545');
-                $("#websocketStatus").removeClass("connected connecting").addClass("disconnected").text("Disconnected");
-                
-                // Set up reconnection
-                if (!reconnectInterval) {
-                    reconnectInterval = setInterval(function() {
-                        if (!isConnected) {
-                            console.log("Attempting to reconnect WebSocket...");
-                            setupWebSocket();
-                        }
-                    }, 5000); // Try to reconnect every 5 seconds
-                }
-            };
-            
-            socket.onerror = function(event) {
-                console.error("WebSocket error:", event);
-                $("#websocketStatus").removeClass("connected connecting").addClass("disconnected").text("Error");
-
-                // If not already in fallback mode, switch to AJAX polling
-                if (!webSocketFailed) {
-                    webSocketFailed = true;
-                    startAjaxPolling();
-                }
-            };
-
-            // Prüfen, ob WebSockets funktionieren, sonst auf AJAX-Polling umschalten
-            let webSocketFailed = false;
-
-            // Timeout: Wenn nach 3 Sekunden die WebSocket-Verbindung nicht hergestellt ist, 
-            // auf AJAX-Polling umschalten
-            setTimeout(function() {
-                if (!isConnected && !webSocketFailed) {
-                    console.log("WebSocket connection timed out, switching to AJAX polling");
-                    webSocketFailed = true;
-                    $("#websocketStatus").removeClass("connected connecting").addClass("disconnected").text("Using AJAX");
-                    
-                    // Start AJAX polling as fallback
-                    startAjaxPolling();
-                }
-            }, 3000);
-        }
+        },
         
-        // AJAX polling function (old method as backup)
-        function startAjaxPolling() {
-            console.log("Starting AJAX polling instead of WebSockets");
-            
-            // Initial data fetch
-            refreshDataViaAjax();
-            
-            // Set up regular polling interval (every 30 seconds)
-            setInterval(refreshDataViaAjax, 30000);
-        }
-
-        function refreshDataViaAjax() {
-            $.ajax({
-                url: "/api/status",
-                type: "GET",
-                dataType: "json",
-                success: function(data) {
-                    // Use the same update function as WebSocket
-                    updateDeviceTable(data);
-                    updateLastUpdatedTime();
-                    updateAutoUpdateStatus(data.pif_auto_update_enabled, data.pogo_auto_update_enabled);
-                    
-                    // Check for update progress
-                    if (data.update_in_progress) {
-                        showUpdateProgress(data.update_progress);
-                    }
-                },
-                error: function() {
-                    console.error("Error refreshing data via AJAX");
-                }
-            });
-        }
-        
-        // Show update progress in modal
-        function showUpdateProgress(progress) {
-            if (!updateModal._isShown) {
-                updateModal.show();
+        // Format date for PIF versions
+        formatDate(dateString) {
+            try {
+                const date = new Date(dateString);
+                return date.toLocaleDateString();
+            } catch (error) {
+                return dateString;
             }
-            
-            $("#updateProgress").css("width", progress + "%");
-            $("#updateMessage").text("Installation in progress...");
-        }
+        },
         
-        // Update auto-update status indicators
-        function updateAutoUpdateStatus(pifEnabled, pogoEnabled) {
-            // Update PIF status badge
-            const pifBadge = $(".badge:contains('PIF Updates')");
-            pifBadge.removeClass("bg-success bg-danger")
-                    .addClass(pifEnabled ? "bg-success" : "bg-danger")
-                    .html(`PIF Updates: ${pifEnabled ? "Automatic" : "Manual"}`);
-            
-            // Update PoGO status badge
-            const pogoBadge = $(".badge:contains('PoGO Updates')");
-            pogoBadge.removeClass("bg-success bg-danger")
-                    .addClass(pogoEnabled ? "bg-success" : "bg-danger")
-                    .html(`PoGO Updates: ${pogoEnabled ? "Automatic" : "Manual"}`);
-            
-            // Update PoGO button label
-            const pogoAutoStatus = $("#pogoAutoStatus");
-            pogoAutoStatus.removeClass("auto-update-enabled auto-update-disabled")
-                          .addClass(pogoEnabled ? "auto-update-enabled" : "auto-update-disabled")
-                          .html(`Auto: ${pogoEnabled ? "ON" : "OFF"}`);
-        }
-        
-        // Refresh single device data
-        function refreshDeviceData(deviceIp) {
-            const refreshIcon = $(`#refresh-${deviceIp}`);
-            refreshIcon.addClass('spinning');
-            
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                // Send specific device refresh command via WebSocket
-                socket.send(`refresh_device:${deviceIp}`);
-                console.log(`Sent refresh command for ${deviceIp} via WebSocket`);
-                
-                // Keep spinning for a moment to show activity
-                setTimeout(() => {
-                    refreshIcon.removeClass('spinning');
-                }, 1000);
+        // Sort table by column
+        sortTable(key, toggleDirection = true) {
+            // If clicking the same header, toggle direction
+            if (toggleDirection && this.sortConfig.key === key) {
+                this.sortConfig.direction = this.sortConfig.direction === 'asc' ? 'desc' : 'asc';
             } else {
-                // Fallback to HTTP if WebSocket not available
-                $.ajax({
-                    url: `/clear-cache?device_ip=${deviceIp}`,
-                    type: "POST",
-                    dataType: "json",
-                    success: function(data) {
-                        setTimeout(() => {
-                            // After clearing cache, refresh the data
-                            if (socket && socket.readyState === WebSocket.OPEN) {
-                                socket.send("refresh");
-                            } else {
-                                // Fallback to location reload if WebSocket unavailable
-                                window.location.reload();
-                            }
-                            refreshIcon.removeClass('spinning');
-                        }, 1000);
-                    },
-                    error: function() {
-                        console.error(`Error refreshing data for ${deviceIp}`);
-                        refreshIcon.removeClass('spinning');
-                    }
-                });
-            }
-        }
-        
-// Modified code for the updateDeviceTable function to properly update all device dropdown menus
-// Update device table with data from WebSocket
-function updateDeviceTable(data) {
-    // Find all device rows
-    const deviceRows = $("tbody tr[data-device-ip]");
-    
-    // Create a map for quick lookups
-    const deviceMap = {};
-    data.devices.forEach(device => {
-        deviceMap[device.ip] = device;
-    });
-    
-    // Update each row
-    deviceRows.each(function() {
-        const row = $(this);
-        const deviceIp = row.attr("data-device-ip");
-        const device = deviceMap[deviceIp];
-        
-        if (device) {
-            // Update all device properties
-            row.find("td:nth-child(1)").text(device.display_name);
-            
-            // Update IP/ID with only the IP part if it has a port
-            const ipDisplay = device.ip.includes(':') ? device.ip.split(':')[0] : device.ip;
-            row.find("td:nth-child(2)").text(ipDisplay);
-            
-            // Update ADB status with error information
-            const adbCell = row.find("td:nth-child(3)");
-            if (device.status) {
-                adbCell.html('<div class="adb-status"><span class="text-success">✅</span></div>');
-            } else {
-                let adbContent = '<div class="adb-status"><span class="text-danger position-relative">❌';
-                
-                if (device.adb_error) {
-                    adbContent += '<span class="adb-error-badge">!</span>';
+                this.sortConfig.key = key;
+                // Only change direction if we're toggling
+                if (toggleDirection) {
+                    this.sortConfig.direction = 'asc';
                 }
-                
-                adbContent += '</span>';
-                
-                if (device.adb_error) {
-                    adbContent += '<span class="status-tooltip">' + device.adb_error + '</span>';
-                }
-                
-                adbContent += '</div>';
-                adbCell.html(adbContent);
             }
             
-            // Update alive status
-            row.find(".is-alive").html(device.is_alive ? "✅" : "❌");
+            const multiplier = this.sortConfig.direction === 'asc' ? 1 : -1;
             
-            // Update control status
-            const controlCell = row.find("td:nth-child(5)");
-            controlCell.html(
-                device.control_enabled ? 
-                '<span class="badge bg-success">Active</span>' : 
-                '<span class="badge bg-secondary">Inactive</span>'
-            );
-            
-            // Update versions
-            row.find(".pogo-version").text(device.pogo);
-            row.find(".mitm-version").text(device.mitm);
-            row.find(".module-version").text(device.module);
-            
-            // Update memory value
-            row.find(".device-memory").text(formatMemory(device.mem_free));
-        }
-    });
-    
-    // Get the latest version info
-    const pogoLatest = data.pogo_latest;
-    const pogoPrevious = data.pogo_previous;
-    
-    console.log("Latest PoGo version:", pogoLatest, "Previous PoGo version:", pogoPrevious);
-    
-    // Update the main update button
-    $("#updateButton").text(`PoGo Update All (${pogoLatest})`);
-    
-    // Update all device dropdown menus individually
-    deviceRows.each(function() {
-        const row = $(this);
-        const dropdownMenu = row.find('.dropdown-menu').filter(function() {
-            return $(this).prev('button').text().trim() === 'PoGo';
-        });
-        
-        if (dropdownMenu.length) {
-            // Get all forms in this specific dropdown
-            const forms = dropdownMenu.find('form[action="/pogo/device-update"]');
-            
-            // First form is for update
-            if (forms.length > 0) {
-                const updateForm = forms.eq(0);
-                updateForm.find('input[name="version"]').val(pogoLatest);
-                updateForm.find('button.dropdown-item').text(`${pogoLatest}`);
-            }
-            
-            // Second form is for downgrade
-            if (forms.length > 1) {
-                const downgradeForm = forms.eq(1);
-                downgradeForm.find('input[name="version"]').val(pogoPrevious);
-                downgradeForm.find('button.dropdown-item').text(`${pogoPrevious}`);
-            }
-        }
-    });
-
-    // If sorting was applied, reapply it
-    if (currentSort && currentSort.column !== null) {
-        const sortType = $(".sortable").eq(currentSort.column).data('sort');
-        sortTable(currentSort.column, currentSort.direction, sortType);
-    }
-}
-    </script>
-    
-    <!-- PIF Versions Loading Script -->
-    <script>
-        // Function to load PIF versions
-        function loadPifVersions() {
-            $.ajax({
-                url: "/api/pif-versions",
-                type: "GET",
-                dataType: "json",
-                success: function(data) {
-                    if (data.versions && data.versions.length > 0) {
-                        // Update all PIF version dropdowns
-                        $(".pif-versions-dropdown").each(function() {
-                            const deviceIp = $(this).data("device-ip");
-                            let items = '';
-                            
-                            // Add the top 5 versions
-                            const versionsToShow = data.versions.slice(0, 5);
-                            versionsToShow.forEach(function(version) {
-                                items += `
-                                <li>
-                                    <form method="post" action="/pif/device-update" class="pif-update-form">
-                                        <input type="hidden" name="device_ip" value="${deviceIp}">
-                                        <input type="hidden" name="version" value="${version.version}">
-                                        <button type="submit" class="dropdown-item">
-                                            ${version.version} (${new Date(version.published_at).toLocaleDateString()})
-                                        </button>
-                                    </form>
-                                </li>`;
-                            });
-                            
-                            // Replace content
-                            $(this).html(items);
-                        });
+            this.sortedDevices = [...this.devices].sort((a, b) => {
+                let aValue, bValue;
+                
+                // Handle different column types
+                switch (key) {
+                    case 'name':
+                        aValue = a.display_name;
+                        bValue = b.display_name;
+                        return multiplier * aValue.localeCompare(bValue);
                         
-                        // Add event listener to the newly created forms
-                        $(".pif-update-form").on("submit", function(e) {
-                            // Show update modal when submitting form
-                            updateModal.show();
-                        });
-                    }
-                },
-                error: function() {
-                    console.error("Error loading PIF versions");
-                    $(".pif-versions-dropdown").html('<li><div class="dropdown-item text-center text-danger">Error loading versions</div></li>');
+                    case 'ip':
+                        aValue = a.ip;
+                        bValue = b.ip;
+                        return multiplier * aValue.localeCompare(bValue);
+                        
+                    case 'adb':
+                    case 'alive':
+                        // Boolean values - true should come first in ascending
+                        aValue = key === 'adb' ? a.status : a.is_alive;
+                        bValue = key === 'adb' ? b.status : b.is_alive;
+                        return multiplier * (bValue === aValue ? 0 : aValue ? -1 : 1);
+                        
+                    case 'control':
+                        aValue = a.control_enabled;
+                        bValue = b.control_enabled;
+                        return multiplier * (bValue === aValue ? 0 : aValue ? -1 : 1);
+                        
+                    case 'pogo':
+                    case 'mitm':
+                    case 'module':
+                        aValue = a[key];
+                        bValue = b[key];
+                        
+                        // Handle N/A values
+                        if (aValue === 'N/A' && bValue === 'N/A') return 0;
+                        if (aValue === 'N/A') return multiplier;
+                        if (bValue === 'N/A') return -multiplier;
+                        
+                        // Compare version numbers
+                        return multiplier * this.compareVersions(aValue, bValue);
+                        
+                    case 'memory':
+                        aValue = a.mem_free || 0;
+                        bValue = b.mem_free || 0;
+                        return multiplier * (aValue - bValue);
+                        
+                    default:
+                        return 0;
                 }
             });
-        }
+        },
         
-        // Load PIF versions when page loads
-        $(document).ready(function() {
-            loadPifVersions();
-            
-            // Refresh versions when clicking on dropdown
-            $(document).on("click", ".pif-versions-dropdown", function(e) {
-                if ($(this).children().length <= 1) {
-                    loadPifVersions();
-                }
-            });
-        });
-    </script>
-
-    <!-- Table sorting functionality -->
-    <script>
-        let currentSort = { column: null, direction: 'asc' };
-        
-        $(document).ready(function() {
-            // Handle click on sortable column headers
-            $(".sortable").click(function() {
-                const column = $(this).index();
-                const sortType = $(this).data('sort');
-                
-                // Toggle sort direction if clicking the same column
-                if (currentSort.column === column) {
-                    currentSort.direction = currentSort.direction === 'asc' ? 'desc' : 'asc';
-                } else {
-                    currentSort.column = column;
-                    currentSort.direction = 'asc';
-                }
-                
-                // Update header appearance
-                $(".sortable").removeClass('asc desc');
-                $(this).addClass(currentSort.direction);
-                
-                // Sort the table
-                sortTable(column, currentSort.direction, sortType);
-            });
-        });
-        
-        // Function to sort table rows
-        function sortTable(column, direction, sortType) {
-            const table = $("#deviceTable");
-            const tbody = table.find('tbody');
-            const rows = tbody.find('tr').get();
-            
-            // Sort rows based on cell content and sort type
-            rows.sort(function(a, b) {
-                // Get the content of cells to compare
-                const aValue = getCellValue(a, column, sortType);
-                const bValue = getCellValue(b, column, sortType);
-                
-                // Compare based on sort type
-                if (sortType === 'text') {
-                    // Standard text comparison
-                    return direction === 'asc' ? 
-                        aValue.localeCompare(bValue) : 
-                        bValue.localeCompare(aValue);
-                } else if (sortType === 'status') {
-                    // Status icons - ✅ should be higher than ❌
-                    const aStatus = aValue.includes('✅') ? 1 : 0;
-                    const bStatus = bValue.includes('✅') ? 1 : 0;
-                    return direction === 'asc' ?
-                        bStatus - aStatus :  // ✅ first in ascending
-                        aStatus - bStatus;   // ✅ first in descending
-                } else if (sortType === 'version') {
-                    // Version comparison (x.y.z)
-                    return direction === 'asc' ?
-                        compareVersions(aValue, bValue) :
-                        compareVersions(bValue, aValue);
-                } else if (sortType === 'memory') {
-                    // Memory comparison (convert MB/GB to number)
-                    return direction === 'asc' ?
-                        compareMemory(aValue, bValue) :
-                        compareMemory(bValue, aValue);
-                }
-                return 0;
-            });
-            
-            // Re-append rows in the new order
-            $.each(rows, function(index, row) {
-                tbody.append(row);
-            });
-        }
-        
-        // Helper to get cell value based on sort type
-        function getCellValue(row, column, sortType) {
-            const cell = $(row).find('td').eq(column);
-            let value = cell.text().trim();
-            
-            // For special elements, get the contained text
-            if (sortType === 'status') {
-                // For status cells, return the complete HTML to check for ✅ or ❌
-                if (column === 2) { // ADB column
-                    return cell.html();
-                } else {
-                    return cell.text();
-                }
-            }
-            
-            return value;
-        }
-        
-        // Compare version strings like "0.123.45"
-        function compareVersions(a, b) {
-            if (a === 'N/A' && b === 'N/A') return 0;
-            if (a === 'N/A') return -1;
-            if (b === 'N/A') return 1;
-            
+        // Compare version strings
+        compareVersions(a, b) {
             const aParts = a.split('.').map(p => parseInt(p) || 0);
             const bParts = b.split('.').map(p => parseInt(p) || 0);
             
-            // Compare each part
             for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
                 const aPart = aParts[i] || 0;
                 const bPart = bParts[i] || 0;
+                
                 if (aPart !== bPart) {
                     return aPart - bPart;
                 }
             }
+            
             return 0;
-        }
+        },
         
-        // Compare memory values like "1,25 MB" or "234,5 kB"
-        function compareMemory(a, b) {
-            if (a === 'N/A' && b === 'N/A') return 0;
-            if (a === 'N/A') return -1;
-            if (b === 'N/A') return 1;
-            
-            // Extract number and unit
-            const aMatch = a.match(/([0-9,.]+)\s*(kB|MB|GB)/);
-            const bMatch = b.match(/([0-9,.]+)\s*(kB|MB|GB)/);
-            
-            if (!aMatch || !bMatch) return 0;
-            
-            // Get numeric value and unit
-            let aValue = parseFloat(aMatch[1].replace(',', '.'));
-            let bValue = parseFloat(bMatch[1].replace(',', '.'));
-            
-            const aUnit = aMatch[2];
-            const bUnit = bMatch[2];
-            
-            // Convert to KB for comparison
-            if (aUnit === 'MB') aValue *= 1024;
-            else if (aUnit === 'GB') aValue *= 1024 * 1024;
-            
-            if (bUnit === 'MB') bValue *= 1024;
-            else if (bUnit === 'GB') bValue *= 1024 * 1024;
-            
-            return aValue - bValue;
+        // Fetch all module versions (both Fork and Fix)
+        fetchAllModuleVersions() {
+            fetch('/api/all-module-versions')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.all) {
+                        this.versions = data.all;
+                        // Set preferred module type as default filter
+                        this.moduleType = data.preferred || 'all';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching module versions:', error);
+                });
+        },
+
+        // Filter versions based on selected module type
+        filteredVersions() {
+            if (!this.versions) return [];
+            if (this.moduleType === 'all') return this.versions.slice(0, 10); // Limit to top 10
+            return this.versions
+                .filter(v => v.module_type === this.moduleType)
+                .slice(0, 10); // Limit to top 10
+        },
+        
+        // Legacy method - kept for compatibility
+        fetchPifVersions() {
+            fetch('/api/pif-versions')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.versions) {
+                        this.versions = data.versions;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching PIF versions:', error);
+                });
         }
-    </script>
-</body>
-</html>
+    };
+}
+</script>
+{% endblock %}

@@ -20,6 +20,7 @@ from typing import List, Dict, Optional, Tuple, Set
 from fastapi import FastAPI, Request, Form, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.templating import Jinja2Templates
 from contextlib import asynccontextmanager
@@ -470,7 +471,7 @@ def get_device_details(device_id: str) -> dict:
                         if is_fork:
                             details["module_version"] = f"Fork {module_version}"
                         else:
-                            details["module_version"] = f"Fix {module_version}" + " (Legacy)"
+                            details["module_version"] = f"Fix {module_version}"
                     else:
                         details["module_version"] = "N/A"
                 else:
@@ -1676,18 +1677,43 @@ async def mapworld_update_task():
 # PIF Version Management Functions
 # ======================================
 PIF_MODULE_DIR = BASE_DIR / "data" / "modules" / "playintegrityfork"
-PIF_GITHUB_API_LATEST = "https://api.github.com/repos/osm0sis/PlayIntegrityFork/releases/latest"
-PIF_GITHUB_API_ALL = "https://api.github.com/repos/osm0sis/PlayIntegrityFork/releases?per_page=10"
+PIFIX_MODULE_DIR = BASE_DIR / "data" / "modules" / "playintegrityfix"
+PIF_GITHUB_API = "https://api.github.com/repos/osm0sis/PlayIntegrityFork/releases?per_page=10"
+PIFIX_GITHUB_API = "https://api.github.com/repos/andi2022/PlayIntegrityFix/releases?per_page=10"
 
-async def fetch_available_pif_versions():
-    """Fetches available PIF versions from GitHub API"""
+# Function to get module preference from config
+def get_preferred_module_type():
+    """Gets the user's preferred module type from config"""
+    config = load_config()
+    # Default to PlayIntegrityFork if not specified
+    return config.get("preferred_module_type", "fork")
+
+# Function to save module preference to config
+def save_module_preference(module_type):
+    """Saves the preferred module type to config"""
+    config = load_config()
+    config["preferred_module_type"] = module_type
+    save_config(config)
+    return config
+
+# Extended function to fetch available module versions for both types
+async def fetch_available_module_versions(module_type="fork"):
+    """Fetches available module versions from GitHub API"""
     try:
+        # Determine which API endpoint to use based on module type
+        if module_type == "fix":
+            api_url = PIFIX_GITHUB_API
+            module_dir = PIFIX_MODULE_DIR
+        else:
+            api_url = PIF_GITHUB_API
+            module_dir = PIF_MODULE_DIR
+        
         # Create directory to store modules if it doesn't exist
-        PIF_MODULE_DIR.mkdir(parents=True, exist_ok=True)
+        module_dir.mkdir(parents=True, exist_ok=True)
         
         # Fetch list of releases
         async with httpx.AsyncClient(follow_redirects=True) as client:
-            print("Fetching PIF releases from GitHub API...")
+            print(f"Fetching {module_type.upper()} releases from GitHub API...")
             
             # Add proper user agent to avoid rate limiting
             headers = {
@@ -1695,7 +1721,7 @@ async def fetch_available_pif_versions():
                 "Accept": "application/vnd.github.v3+json"
             }
             
-            response = await client.get(PIF_GITHUB_API_ALL, headers=headers, timeout=15)
+            response = await client.get(api_url, headers=headers, timeout=15)
             if response.status_code != 200:
                 print(f"GitHub API Error: {response.status_code}")
                 return []
@@ -1727,25 +1753,20 @@ async def fetch_available_pif_versions():
                     
                     if zip_asset:
                         download_url = zip_asset.get("browser_download_url")
-                        
-                        # If the API provides a non-browser URL, convert to direct download URL
-                        if "api.github.com" in download_url:
-                            download_url = download_url.replace("api.github.com/repos", "github.com")
-                            download_url = download_url.replace("releases/assets", "releases/download/" + tag_name)
-                        
                         filename = zip_asset.get("name")
                         versions.append({
                             "version": version,
                             "tag_name": tag_name,
                             "published_at": published_at,
                             "download_url": download_url,
-                            "filename": filename
+                            "filename": filename,
+                            "module_type": module_type  # Add module type to know the source
                         })
                 
                 # Sort versions by numeric value (newer first)
                 versions.sort(key=lambda x: parse_version(x["version"]), reverse=True)
                 
-                print(f"Found {len(versions)} PIF versions")
+                print(f"Found {len(versions)} {module_type.upper()} versions")
                 return versions
                 
             except json.JSONDecodeError:
@@ -1753,26 +1774,40 @@ async def fetch_available_pif_versions():
                 return []
                 
     except Exception as e:
-        print(f"Error fetching PIF versions: {str(e)}")
+        print(f"Error fetching {module_type.upper()} versions: {str(e)}")
         return []
 
-async def download_pif_version(version_info):
-    """Downloads a PIF version and saves it with the original filename"""
+async def fetch_available_pif_versions():
+    """
+    Compatibility function to maintain backward compatibility with existing code.
+    Simply calls fetch_available_module_versions with 'fork' as the module type.
+    """
+    return await fetch_available_module_versions("fork")
+
+async def download_module_version(version_info):
+    """Downloads a module version and saves it with the original filename"""
     try:
         version = version_info["version"]
         download_url = version_info["download_url"]
         filename = version_info["filename"]
+        module_type = version_info.get("module_type", "fork")  # Default to fork if not specified
         
+        # Determine the correct module directory
+        if module_type == "fix":
+            module_dir = PIFIX_MODULE_DIR
+        else:
+            module_dir = PIF_MODULE_DIR
+            
         # Define path where the module will be saved
-        module_path = PIF_MODULE_DIR / filename
+        module_path = module_dir / filename
         
         # Check if already downloaded
         if module_path.exists():
-            print(f"PIF version {version} already downloaded at {module_path}")
+            print(f"{module_type.upper()} version {version} already downloaded at {module_path}")
             return module_path
         
         # Download the ZIP with proper headers to avoid GitHub redirects
-        print(f"Downloading PIF version {version} from {download_url}")
+        print(f"Downloading {module_type.upper()} version {version} from {download_url}")
         async with httpx.AsyncClient(follow_redirects=True) as client:
             # Adding browser-like headers to prevent GitHub from returning HTML page
             headers = {
@@ -1794,9 +1829,14 @@ async def download_pif_version(version_info):
                 print(f"GitHub returned HTML instead of ZIP file. Using alternative download method...")
                 
                 # Alternative method: Try direct download from browser URL
-                # Convert API URL to direct download URL
-                direct_url = download_url.replace("/api.github.com/repos/", "/github.com/")
-                direct_url = direct_url.replace("/releases/assets/", "/releases/download/v")
+                # Adjust the URL transformation based on the module type
+                if module_type == "fix":
+                    direct_url = download_url.replace("/api.github.com/repos/", "/github.com/")
+                    direct_url = direct_url.replace("/releases/assets/", "/releases/download/v")
+                else:
+                    direct_url = download_url.replace("/api.github.com/repos/", "/github.com/")
+                    direct_url = direct_url.replace("/releases/assets/", "/releases/download/v")
+                
                 direct_url = direct_url.replace("/download/v", "/download/v" + version + "/")
                 
                 print(f"Trying alternative URL: {direct_url}")
@@ -1824,22 +1864,64 @@ async def download_pif_version(version_info):
                 module_path.unlink()
                 return None
         
-        print(f"Successfully downloaded PIF version {version} to {module_path}")
+        print(f"Successfully downloaded {module_type.upper()} version {version} to {module_path}")
         return module_path
         
     except Exception as e:
-        print(f"Error downloading PIF version {version}: {str(e)}")
+        print(f"Error downloading {version_info.get('module_type', 'fork').upper()} version {version}: {str(e)}")
         traceback.print_exc()
         return None
 
+# Combine version fetching for both module types
+async def get_all_module_versions_for_ui():
+    """Returns combined module versions for UI display"""
+    fork_versions = await fetch_available_module_versions("fork")
+    fix_versions = await fetch_available_module_versions("fix")
+    
+    # Add a descriptive name for display
+    for version in fork_versions:
+        version["name"] = f"PlayIntegrityFork {version['version']}"
+    for version in fix_versions:
+        version["name"] = f"PlayIntegrityFix {version['version']}"
+    
+    # Sort all versions by date (newest first)
+    combined_versions = fork_versions + fix_versions
+    combined_versions.sort(key=lambda x: x["published_at"], reverse=True)
+    
+    # Group by module type and return
+    return {
+        "all": combined_versions,
+        "fork": fork_versions,
+        "fix": fix_versions,
+        "preferred": get_preferred_module_type()
+    }
+
 async def get_pif_versions_for_ui():
-    """Returns PIF versions for UI display"""
-    versions = await fetch_available_pif_versions()
+    """
+    Compatibility function for code that uses get_pif_versions_for_ui.
+    Returns versions based on the preferred module type.
+    """
+    config = load_config()
+    preferred_module = config.get("preferred_module_type", "fork")
+    
+    # Get versions for the preferred module type
+    versions = await fetch_available_module_versions(preferred_module)
+    
+    # Return in expected format
     # Sort versions newest first
     versions.sort(key=lambda x: parse_version(x["version"]), reverse=True)
     return versions
 
-# Update PIF update task to auto-migrate from Fix to Fork
+# Make sure we have all compatibility functions
+# This ensures any existing code that calls original functions continues to work
+async def fetch_pif_version(version_info):
+    """Compatibility wrapper for download_module_version"""
+    return await download_module_version(version_info)
+
+async def install_pif_module(device_ip: str, pif_module_path=None):
+    """Compatibility wrapper for install_module_with_progress"""
+    return await install_module_with_progress(device_ip, pif_module_path, "fork")
+
 async def pif_update_task():
     """Checks and installs PIF updates, including migration from Fix to Fork"""
     last_checked_version = "0.0"  # Track the last version we checked to avoid redundant notifications
@@ -1850,10 +1932,13 @@ async def pif_update_task():
             
             print("🔍 Checking for PlayIntegrityFork updates...")
 
-            # Fetch available versions regardless of auto-update setting
-            versions = await fetch_available_pif_versions()
+            # Get preferred module type from config, default to "fork"
+            preferred_module = config.get("preferred_module_type", "fork")
+
+            # Fetch available versions with the preferred module type
+            versions = await fetch_available_module_versions(preferred_module)
             if not versions:
-                print("❌ No valid PlayIntegrityFork versions available, skipping check.")
+                print(f"❌ No valid {preferred_module.upper()} versions available, skipping check.")
                 await asyncio.sleep(3 * 3600)  # Repeat every 3 hours
                 continue
                 
@@ -1861,7 +1946,7 @@ async def pif_update_task():
             latest_version = versions[0]
             new_version = latest_version["version"]
 
-            print(f"📌 Latest PlayIntegrityFork version available: {new_version}")
+            print(f"📌 Latest {preferred_module.upper()} version available: {new_version}")
             
             # Skip if we already checked this version
             if new_version == last_checked_version:
@@ -1873,7 +1958,7 @@ async def pif_update_task():
             last_checked_version = new_version
             
             # Download the module regardless of auto-update setting
-            module_path = await download_pif_version(latest_version)
+            module_path = await download_module_version(latest_version)
             if not module_path:
                 print("Failed to download module, skipping update")
                 await asyncio.sleep(3 * 3600)
@@ -1881,7 +1966,7 @@ async def pif_update_task():
 
             # Check if PIF auto-update is enabled
             if not config.get("pif_auto_update_enabled", True):
-                print("PIF auto-update is disabled in configuration. Module downloaded but not installed.")
+                print(f"{preferred_module.upper()} auto-update is disabled in configuration. Module downloaded but not installed.")
                 await asyncio.sleep(3 * 3600)  # Check every 3 hours anyway
                 continue
 
@@ -1899,56 +1984,56 @@ async def pif_update_task():
                         
                         # Check if any module is installed
                         if installed_version == "N/A":
-                            print(f"⚠️ No Play Integrity module found on {ip}, will install PlayIntegrityFork")
+                            print(f"⚠️ No Play Integrity module found on {ip}, will install module")
                             devices_to_update.append(ip)
                             continue
                             
                         # Check which module is installed (Fix or Fork)
-                        if "Legacy" in installed_version or "Fix" in installed_version:
-                            # Old PlayIntegrityFix found, needs update to Fork
-                            print(f"🔄 Device {ip} has legacy PlayIntegrityFix module, migrating to PlayIntegrityFork")
+                        module_is_fork = "Fork" in installed_version
+                        
+                        # If preferred is "fix" but "fork" is installed, or vice versa, update
+                        if (preferred_module == "fix" and module_is_fork) or (preferred_module == "fork" and not module_is_fork):
+                            print(f"🔄 Device {ip} has different module type than preferred, updating to {preferred_module.upper()}")
                             devices_to_update.append(ip)
                             continue
                         
-                        # Extract version number from the Fork module version string
-                        if "Fork" in installed_version:
+                        # Extract version number from the module version string
+                        if module_is_fork:
                             version_match = re.search(r'Fork\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_version)
-                            if version_match:
-                                current_version = version_match.group(1)
-                                print(f"🔍 Current PlayIntegrityFork version on {ip}: {current_version}, available: {new_version}")
-                                
-                                # Compare versions - handle numeric versions and various formats
-                                # For simple number versions like "12" vs "13"
-                                try:
-                                    # Try simple numeric comparison first (for formats like "12" vs "13")
-                                    current_num = int(re.search(r'(\d+)', current_version).group(1))
-                                    new_num = int(re.search(r'(\d+)', new_version).group(1))
-                                    
-                                    if current_num < new_num:
-                                        print(f"🚨 Update needed for {ip}! Installed: {current_version}, Available: {new_version}")
-                                        devices_to_update.append(ip)
-                                    else:
-                                        print(f"✅ Device {ip} already has latest PlayIntegrityFork version, skipping update.")
-                                except (ValueError, AttributeError):
-                                    # Fallback to more complex version comparison
-                                    installed_version_tuple = parse_version(current_version)
-                                    new_version_tuple = parse_version(new_version)
-                                    
-                                    if not installed_version_tuple or not new_version_tuple:
-                                        print(f"⚠️ Invalid version format for comparison on {ip}")
-                                        continue
-                                        
-                                    if installed_version_tuple < new_version_tuple:
-                                        print(f"🚨 Update needed for {ip}! Installed: {current_version}, Available: {new_version}")
-                                        devices_to_update.append(ip)
-                                    else:
-                                        print(f"✅ Device {ip} already has latest PlayIntegrityFork version, skipping update.")
-                            else:
-                                print(f"⚠️ Could not parse version from {installed_version} on {ip}, scheduling update")
-                                devices_to_update.append(ip)
                         else:
-                            # Unknown module format, update to be safe
-                            print(f"❓ Unknown module format on {ip}: {installed_version}, scheduling update")
+                            version_match = re.search(r'Fix\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_version)
+                            
+                        if version_match:
+                            current_version = version_match.group(1)
+                            print(f"🔍 Current module version on {ip}: {current_version}, available: {new_version}")
+                            
+                            # Compare versions - handle numeric versions and various formats
+                            try:
+                                # Try simple numeric comparison first (for formats like "12" vs "13")
+                                current_num = int(re.search(r'(\d+)', current_version).group(1))
+                                new_num = int(re.search(r'(\d+)', new_version).group(1))
+                                
+                                if current_num < new_num:
+                                    print(f"🚨 Update needed for {ip}! Installed: {current_version}, Available: {new_version}")
+                                    devices_to_update.append(ip)
+                                else:
+                                    print(f"✅ Device {ip} already has latest version, skipping update.")
+                            except (ValueError, AttributeError):
+                                # Fallback to more complex version comparison
+                                installed_version_tuple = parse_version(current_version)
+                                new_version_tuple = parse_version(new_version)
+                                
+                                if not installed_version_tuple or not new_version_tuple:
+                                    print(f"⚠️ Invalid version format for comparison on {ip}")
+                                    continue
+                                    
+                                if installed_version_tuple < new_version_tuple:
+                                    print(f"🚨 Update needed for {ip}! Installed: {current_version}, Available: {new_version}")
+                                    devices_to_update.append(ip)
+                                else:
+                                    print(f"✅ Device {ip} already has latest version, skipping update.")
+                        else:
+                            print(f"⚠️ Could not parse version from {installed_version} on {ip}, scheduling update")
                             devices_to_update.append(ip)
                     else:
                         print(f"Device {ip} not reachable via ADB, skipping update check")
@@ -1958,19 +2043,19 @@ async def pif_update_task():
             # Perform updates if needed
             update_count = len(devices_to_update)
             if update_count > 0:
-                print(f"🚀 Installing PlayIntegrityFork version {new_version} on {update_count} devices")
+                print(f"🚀 Installing {preferred_module.upper()} version {new_version} on {update_count} devices")
                 
                 for ip in devices_to_update:
                     try:
-                        print(f"⚡ Updating device {ip} to PlayIntegrityFork version {new_version}")
-                        await install_pif_module(ip, module_path)
+                        print(f"⚡ Updating device {ip} to {preferred_module.upper()} version {new_version}")
+                        await install_module_with_progress(ip, module_path, preferred_module)
 
                     except Exception as e:
-                        print(f"Error installing PlayIntegrityFork on {ip}: {str(e)}")
+                        print(f"Error installing module on {ip}: {str(e)}")
                 
                 # Clear the cache to load new values
                 get_device_details.cache_clear()
-                print("✅ PlayIntegrityFork update complete – device details cache cleared.")
+                print(f"✅ {preferred_module.upper()} update complete – device details cache cleared.")
                 
                 # Send WebSocket update after installations
                 status_data = await get_status_data()
@@ -1979,7 +2064,7 @@ async def pif_update_task():
                 print("✅ All devices already have the latest version. No updates needed.")
 
         except Exception as e:
-            print(f"❌ PlayIntegrityFork Auto-Update Error: {str(e)}")
+            print(f"❌ Module Auto-Update Error: {str(e)}")
             import traceback
             traceback.print_exc()
 
@@ -2956,6 +3041,34 @@ def require_login(request: Request):
         return RedirectResponse(url="/login", status_code=302)
     return None
 
+def is_htmx_request(request: Request) -> bool:
+    """Check if the request is coming from HTMX"""
+    return request.headers.get("HX-Request") == "true"
+
+def get_template_context(request: Request, **kwargs):
+    """Get common template context with additional values"""
+    context = {"request": request}
+    context.update(kwargs)
+    return context
+
+async def get_status_data_with_tailwind_classes():
+    """Enhanced version of get_status_data that adds Tailwind CSS-specific class information"""
+    # Get the base status data
+    data = await get_status_data()
+    
+    # Add Tailwind-specific properties to each device
+    for device in data["devices"]:
+        # Add status colors
+        device["adb_status_class"] = "text-green-500" if device["status"] else "text-red-500"
+        device["alive_status_class"] = "text-green-500" if device["is_alive"] else "text-red-500"
+        device["control_class"] = "bg-green-900/50 text-green-400" if device["control_enabled"] else "bg-gray-800 text-gray-400"
+    
+    # Add auto-update status classes
+    data["pif_auto_update_class"] = "bg-green-900/30 text-green-400 border-green-700" if data["pif_auto_update_enabled"] else "bg-red-900/30 text-red-400 border-red-700"
+    data["pogo_auto_update_class"] = "bg-green-900/30 text-green-400 border-green-700" if data["pogo_auto_update_enabled"] else "bg-red-900/30 text-red-400 border-red-700"
+    
+    return data
+
 # ======================================
 # FastAPI Initialization
 # ======================================
@@ -3048,7 +3161,25 @@ def login_action(request: Request, username: str = Form(...), password: str = Fo
         if user["username"] == username and user["password"] == password:
             request.session["logged_in"] = True
             request.session["username"] = username
-            return RedirectResponse(url="/status", status_code=302)
+            
+            # Add HX-Redirect header for HTMX requests
+            response = RedirectResponse(url="/status", status_code=303)
+            response.headers["HX-Redirect"] = "/status"
+            return response
+    
+    # For HTMX requests, return a partial with error
+    if is_htmx_request(request):
+        error_message = """
+        <div class="bg-red-900/50 border border-red-800 text-red-100 px-4 py-3 rounded mb-4" role="alert">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 inline mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            Invalid credentials
+        </div>
+        """
+        return HTMLResponse(content=error_message)
+    
+    # Regular form submission
     return templates.TemplateResponse("login.html", {
         "request": request,
         "error": "Invalid credentials"
@@ -3241,7 +3372,7 @@ def update_memory_threshold(request: Request, device_ip: str = Form(...), memory
     return RedirectResponse(url="/settings", status_code=302)
 
 @app.post("/pif/device-update", response_class=HTMLResponse)
-async def pif_device_update(request: Request, device_ip: str = Form(...), version: str = Form(...)):
+async def pif_device_update(request: Request, device_ip: str = Form(...), version: str = Form(...), module_type: str = Form("fork")):
     global update_in_progress, current_progress
 
     device_id = format_device_id(device_ip)
@@ -3254,56 +3385,56 @@ async def pif_device_update(request: Request, device_ip: str = Form(...), versio
         update_in_progress = True
         update_progress(10)  # Start at 10%
         
-        # Fetch available versions
-        versions = await fetch_available_pif_versions()
+        # Fetch available versions for the selected module type
+        versions = await fetch_available_module_versions(module_type)
         update_progress(20)  # Fetching versions complete
         
         # Find the specific version
         target_version = None
         for ver in versions:
-            if ver["version"] == version:
+            if ver["version"] == version and ver["module_type"] == module_type:
                 target_version = ver
                 break
         
         if not target_version:
             update_in_progress = False
             current_progress = 0
-            return RedirectResponse(url="/status?error=PlayIntegrityFork version not found", status_code=302)
+            return RedirectResponse(url=f"/status?error=Module version {version} not found", status_code=302)
         
         update_progress(30)  # Version found
         
         # Download the specific version
         update_progress(40)  # Start download
-        pif_module = await download_pif_version(target_version)
+        module_file = await download_module_version(target_version)
         update_progress(50)  # Download complete
         
-        if not pif_module:
+        if not module_file:
             update_in_progress = False
             current_progress = 0
-            return RedirectResponse(url="/status?error=Failed to download PlayIntegrityFork version", status_code=302)
+            return RedirectResponse(url=f"/status?error=Failed to download module version", status_code=302)
         
         # Install on device
         update_progress(60)  # Start installation
         
         # Create a background task for installation to maintain progress updates
-        asyncio.create_task(install_pif_module_with_progress(device_ip, pif_module))
+        asyncio.create_task(install_module_with_progress(device_ip, module_file, module_type))
         
         # Redirect immediately to status page, the update will happen in background
         return RedirectResponse(url="/status", status_code=302)
     except Exception as e:
-        print(f"Error updating device {device_ip} to PlayIntegrityFork version {version}: {str(e)}")
+        print(f"Error updating device {device_ip} to module version {version}: {str(e)}")
         update_in_progress = False
         current_progress = 0
-        return RedirectResponse(url="/status?error=PlayIntegrityFork update failed", status_code=302)
+        return RedirectResponse(url="/status?error=Module update failed", status_code=302)
 
-# New function to install PIF module with progress updates
-async def install_pif_module_with_progress(device_ip: str, pif_module_path=None):
-    """Installs PlayIntegrityFork module with progress updates for the UI"""
+# New installation function that works with both module types
+async def install_module_with_progress(device_ip: str, module_path=None, module_type="fork"):
+    """Installs PlayIntegrityFork or PlayIntegrityFix module with progress updates for the UI"""
     global update_in_progress, current_progress
     
     try:
         device_id = format_device_id(device_ip)
-        print(f"Starting PlayIntegrityFork module installation for {device_ip}")
+        print(f"Starting {module_type.upper()} module installation for {device_ip}")
         
         # Make sure ADB connection is established
         update_progress(65)
@@ -3315,15 +3446,15 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         )
         
         # Check if module exists
-        if pif_module_path is None or not Path(pif_module_path).exists():
-            print(f"PlayIntegrityFork module not found at {pif_module_path}")
+        if module_path is None or not Path(module_path).exists():
+            print(f"Module file not found at {module_path}")
             update_in_progress = False
             current_progress = 0
             return
         
         # Extract version from filename
         version = "unknown"
-        filename = Path(pif_module_path).name
+        filename = Path(module_path).name
         version_match = re.search(r'v?(\d+\.\d+)', filename)
         if version_match:
             version = version_match.group(1)
@@ -3336,13 +3467,11 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         update_progress(70)
         subprocess.run(["adb", "connect", device_ip], check=True, timeout=10)
         
-        # Remove PlayIntegrityFix (old module)
+        # Always remove both module types to avoid conflicts
         subprocess.run(
             ["adb", "-s", device_ip, "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfix'"],
             timeout=15
         )
-        
-        # Also remove PlayIntegrityFork (in case of previous installation)
         subprocess.run(
             ["adb", "-s", device_ip, "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfork'"],
             timeout=15
@@ -3374,7 +3503,7 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         
         # Push and install module
         update_progress(82)
-        print(f"Pushing PlayIntegrityFork module to {device_ip}")
+        print(f"Pushing {module_type.upper()} module to {device_ip}")
         subprocess.run(
             ["adb", "connect", device_ip], 
             check=True, 
@@ -3382,14 +3511,14 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         )
         subprocess.run(
             ["adb", "-s", device_ip, "push", 
-             str(pif_module_path), 
+             str(module_path), 
              "/data/local/tmp/pif.zip"],
             check=True,
             timeout=60
         )
         
         update_progress(85)
-        print(f"Installing PlayIntegrityFork module on {device_ip}")
+        print(f"Installing {module_type.upper()} module on {device_ip}")
         subprocess.run(
             ["adb", "-s", device_ip, "shell", 
              "su -c 'magisk --install-module /data/local/tmp/pif.zip'"],
@@ -3405,16 +3534,17 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         
         # Final reboot
         update_progress(95)
-        print(f"Final reboot for {device_ip} to apply PlayIntegrityFork module")
+        print(f"Final reboot for {device_ip} to apply {module_type.upper()} module")
         subprocess.run(["adb", "-s", device_ip, "reboot"], check=True, timeout=60)
 
         # Clear caches
         device_status_cache.clear()
         get_device_details.cache_clear()
-        print(f"PlayIntegrityFork update complete for {device_ip} – device details cache cleared")
+        print(f"{module_type.upper()} update complete for {device_ip} – device details cache cleared")
 
-        # Send notification
-        await notify_update_installed(device_name, device_ip, "PlayIntegrityFork", version)
+        # Send notification with module type
+        module_name = "PlayIntegrityFork" if module_type == "fork" else "PlayIntegrityFix"
+        await notify_update_installed(device_name, device_ip, module_name, version)
         
         # Send WebSocket update
         status_data = await get_status_data()
@@ -3427,7 +3557,7 @@ async def install_pif_module_with_progress(device_ip: str, pif_module_path=None)
         current_progress = 0
     
     except Exception as e:
-        print(f"PlayIntegrityFork Installation error for {device_ip}: {str(e)}")
+        print(f"Module Installation error for {device_ip}: {str(e)}")
         traceback.print_exc()
         update_in_progress = False
         current_progress = 0
@@ -3556,10 +3686,12 @@ def get_update_status():
     }
 
 @app.get("/api/status")
-def api_status(request: Request):
+async def api_status(request: Request):
     if not is_logged_in(request):
         return {"error": "Not authenticated"}
     
+    status_data = await get_status_data_with_tailwind_classes()
+    return status_data
     config = load_config()
     devices = []
     
@@ -3615,6 +3747,31 @@ async def api_pif_versions(request: Request):
         
     versions = await get_pif_versions_for_ui()
     return {"versions": versions}
+
+@app.get("/api/all-module-versions")
+async def api_all_module_versions(request: Request):
+    """Returns combined module versions for UI"""
+    if not is_logged_in(request):
+        return {"error": "Not authenticated"}
+        
+    versions = await get_all_module_versions_for_ui()
+    return versions
+
+@app.post("/settings/set-module-preference")
+async def set_module_preference(request: Request, module_type: str = Form(...)):
+    """Sets the preferred module type in configuration"""
+    if not is_logged_in(request):
+        return RedirectResponse(url="/login", status_code=302)
+    
+    # Validate module type
+    if module_type not in ["fork", "fix"]:
+        module_type = "fork"  # Default to fork if invalid
+    
+    # Save preference
+    config = save_module_preference(module_type)
+    
+    # Redirect back to settings
+    return RedirectResponse(url="/settings?success=Module preference updated successfully", status_code=302)
 
 @app.post("/devices/restart-apps", response_class=HTMLResponse)
 async def restart_apps(request: Request, device_ip: str = Form(...)):
@@ -3707,6 +3864,54 @@ def authorize_device(request: Request, device_ip: str = Form(...)):
     except Exception as e:
         print(f"Error authorizing device {device_ip}: {str(e)}")
         return RedirectResponse(url="/settings?error=Authorization error: {str(e)}", status_code=302)
+
+@app.websocket("/ws/htmx/status")
+async def websocket_htmx_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for HTMX streaming updates"""
+    await ws_manager.connect(websocket)
+    try:
+        # Initial data
+        status_data = await get_status_data()
+        html_response = templates.TemplateResponse(
+            "partials/device_table.html", 
+            {"request": {}, "devices": status_data["devices"]}
+        )
+        await websocket.send_text(html_response.body.decode())
+        
+        # Keep the connection alive
+        while True:
+            try:
+                # Wait for client messages (commands)
+                data = await websocket.receive_text()
+                
+                if data == "refresh":
+                    # If a refresh is requested, send fresh data
+                    status_data = await get_status_data()
+                    html_response = templates.TemplateResponse(
+                        "partials/device_table.html", 
+                        {"request": {}, "devices": status_data["devices"]}
+                    )
+                    await websocket.send_text(html_response.body.decode())
+            except asyncio.TimeoutError:
+                # Keep connection alive
+                await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+
+@app.get("/api/update-progress", response_class=HTMLResponse)
+def get_update_progress():
+    """Returns the current update progress as HTML for HTMX"""
+    progress_html = f"""
+    <div class="bg-dark-800 rounded-lg p-4 border border-gray-700">
+        <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-gray-700">
+            <div class="w-{current_progress}% shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500 transition-all duration-500"></div>
+        </div>
+        <p class="text-center text-sm text-gray-300">
+            {current_progress}% Complete
+        </p>
+    </div>
+    """
+    return HTMLResponse(content=progress_html)
 
 if __name__ == "__main__":
     import uvicorn
