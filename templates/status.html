@@ -18,12 +18,9 @@
         </h1>
         
         <div class="flex items-center space-x-3">
-            <form hx-post="/pogo/update" hx-target="#updateModal" hx-swap="outerHTML">
-                <button type="submit" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                        @click="showUpdateModal = true">
-                    <span>PoGo Update All (<span x-text="pogoLatest"></span>)</span>
-                </button>
-            </form>
+            <button type="button" @click="pogoUpdateAll()" class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                <span>PoGo Update All (<span x-text="pogoLatest"></span>)</span>
+            </button>
             
             <button type="button" @click="refreshData()" class="inline-flex items-center px-4 py-2 border border-gray-700 text-sm font-medium rounded-md text-gray-200 bg-gray-800 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" :class="{ 'animate-spin': isRefreshing }">
@@ -177,16 +174,8 @@
                                     </button>
                                     <div x-show="open" @click.away="open = false" class="origin-top-right absolute mt-2 w-48 rounded-md shadow-lg bg-gray-900 ring-1 ring-black ring-opacity-5 z-10">
                                         <div class="py-1 divide-y divide-gray-700">
-                                            <form hx-post="/pogo/device-update" hx-target="#updateModal" hx-swap="outerHTML">
-                                                <input type="hidden" name="device_ip" :value="device.ip">
-                                                <input type="hidden" name="version" :value="pogoLatest">
-                                                <button type="submit" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 w-full text-left" x-text="pogoLatest" @click="showUpdateModal = true"></button>
-                                            </form>
-                                            <form hx-post="/pogo/device-update" hx-target="#updateModal" hx-swap="outerHTML">
-                                                <input type="hidden" name="device_ip" :value="device.ip">
-                                                <input type="hidden" name="version" :value="pogoPrevious">
-                                                <button type="submit" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 w-full text-left" x-text="pogoPrevious" @click="showUpdateModal = true"></button>
-                                            </form>
+                                            <button type="button" @click="updateDevicePogo(device.ip, pogoLatest)" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 w-full text-left" x-text="pogoLatest"></button>
+                                            <button type="button" @click="updateDevicePogo(device.ip, pogoPrevious)" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 w-full text-left" x-text="pogoPrevious"></button>
                                         </div>
                                     </div>
                                 </div>
@@ -222,22 +211,19 @@
                                             
                                             <div class="max-h-60 overflow-y-auto divide-y divide-gray-700">
                                                 <template x-for="version in filteredVersions()" :key="`${version.module_type}-${version.version}`">
-                                                    <form hx-post="/pif/device-update" hx-target="#updateModal" hx-swap="outerHTML">
-                                                        <input type="hidden" name="device_ip" :value="device.ip">
-                                                        <input type="hidden" name="version" :value="version.version">
-                                                        <input type="hidden" name="module_type" :value="version.module_type">
-                                                        <button type="submit" class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-800 transition-colors" @click="showUpdateModal = true">
-                                                            <div class="flex justify-between items-center">
-                                                                <div>
-                                                                    <span class="text-white font-medium" x-text="version.name"></span>
-                                                                    <span class="text-xs text-gray-500 ml-1" x-text="formatDate(version.published_at)"></span>
-                                                                </div>
-                                                                <span class="px-1.5 py-0.5 text-xs rounded" 
-                                                                      :class="version.module_type === 'fork' ? 'bg-blue-900/40 text-blue-300 border border-blue-800' : 'bg-yellow-900/40 text-yellow-300 border border-yellow-800'"
-                                                                      x-text="version.module_type === 'fork' ? 'Fork' : 'Fix'"></span>
+                                                    <button type="button" 
+                                                            @click="updateDeviceModule(device.ip, version.version, version.module_type)" 
+                                                            class="block w-full text-left px-4 py-2 text-sm hover:bg-gray-800 transition-colors">
+                                                        <div class="flex justify-between items-center">
+                                                            <div>
+                                                                <span class="text-white font-medium" x-text="version.name"></span>
+                                                                <span class="text-xs text-gray-500 ml-1" x-text="formatDate(version.published_at)"></span>
                                                             </div>
-                                                        </button>
-                                                    </form>
+                                                            <span class="px-1.5 py-0.5 text-xs rounded" 
+                                                                  :class="version.module_type === 'fork' ? 'bg-blue-900/40 text-blue-300 border border-blue-800' : 'bg-yellow-900/40 text-yellow-300 border border-yellow-800'"
+                                                                  x-text="version.module_type === 'fork' ? 'Fork' : 'Fix'"></span>
+                                                        </div>
+                                                    </button>
                                                 </template>
                                                 <div x-show="filteredVersions().length === 0" class="px-4 py-2 text-sm text-gray-500 text-center">
                                                     <template x-if="versions.length === 0">Loading versions...</template>
@@ -248,19 +234,13 @@
                                     </div>
                                 </div>
                                 
-                                <form hx-post="/devices/restart-apps" hx-target="closest tr" hx-confirm="Restart apps on this device?">
-                                    <input type="hidden" name="device_ip" :value="device.ip">
-                                    <button type="submit" class="px-3 py-1 bg-yellow-900/30 hover:bg-yellow-900/50 text-yellow-500 border border-yellow-700 rounded-md text-xs">
-                                        Restart
-                                    </button>
-                                </form>
+                                <button type="button" @click="restartDevice(device.ip)" class="px-3 py-1 bg-yellow-900/30 hover:bg-yellow-900/50 text-yellow-500 border border-yellow-700 rounded-md text-xs">
+                                    Restart
+                                </button>
                                 
-                                <form hx-post="/devices/reboot" hx-confirm="Reboot this device? This will take some time.">
-                                    <input type="hidden" name="device_ip" :value="device.ip">
-                                    <button type="submit" class="px-3 py-1 bg-red-900/30 hover:bg-red-900/50 text-red-500 border border-red-700 rounded-md text-xs">
-                                        Reboot
-                                    </button>
-                                </form>
+                                <button type="button" @click="rebootDevice(device.ip)" class="px-3 py-1 bg-red-900/30 hover:bg-red-900/50 text-red-500 border border-red-700 rounded-md text-xs">
+                                    Reboot
+                                </button>
                             </td>
                         </tr>
                     </template>
@@ -593,6 +573,155 @@ function statusPage() {
                 .catch(error => {
                     console.error('Error fetching PIF versions:', error);
                 });
+        },
+        
+        // NEW ACTION METHODS
+        
+        // PoGo Update All button
+        pogoUpdateAll() {
+            this.showUpdateModal = true;
+            
+            const formData = new FormData();
+            
+            fetch('/pogo/update', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                if (response.redirected) {
+                    // Don't redirect - we'll just update UI
+                    this.refreshData();
+                }
+            })
+            .catch(error => {
+                console.error('Error during PoGo update:', error);
+                alert('Failed to update PoGo on devices');
+                this.showUpdateModal = false;
+            });
+        },
+        
+        // Update PoGo on single device
+        updateDevicePogo(deviceIp, version) {
+            this.showUpdateModal = true;
+            
+            const formData = new FormData();
+            formData.append('device_ip', deviceIp);
+            formData.append('version', version);
+            
+            fetch('/pogo/device-update', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                if (response.redirected) {
+                    // Don't redirect - we'll just update UI
+                    this.refreshData();
+                }
+            })
+            .catch(error => {
+                console.error('Error during PoGo device update:', error);
+                alert('Failed to update PoGo on device');
+                this.showUpdateModal = false;
+            });
+        },
+        
+        // Update Module on single device
+        updateDeviceModule(deviceIp, version, moduleType) {
+            this.showUpdateModal = true;
+            
+            const formData = new FormData();
+            formData.append('device_ip', deviceIp);
+            formData.append('version', version);
+            formData.append('module_type', moduleType);
+            
+            fetch('/pif/device-update', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                if (response.redirected) {
+                    // Don't redirect - we'll just update UI
+                    this.refreshData();
+                }
+            })
+            .catch(error => {
+                console.error('Error during module update:', error);
+                alert('Failed to update module on device');
+                this.showUpdateModal = false;
+            });
+        },
+        
+        // Restart device apps
+        restartDevice(deviceIp) {
+            if (!confirm('Restart apps on this device?')) return;
+            
+            this.isRefreshing = true;
+            const formData = new FormData();
+            formData.append('device_ip', deviceIp);
+            
+            fetch('/devices/restart-apps', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                if (response.redirected) {
+                    // Don't redirect - we'll just update UI
+                    this.refreshData();
+                } else {
+                    this.refreshData(); // Refresh device status after operation
+                }
+            })
+            .catch(error => {
+                console.error('Error during restart:', error);
+                alert('Failed to restart device');
+            })
+            .finally(() => {
+                this.isRefreshing = false;
+            });
+        },
+        
+        // Reboot device
+        rebootDevice(deviceIp) {
+            if (!confirm('Reboot this device? This will take some time.')) return;
+            
+            this.isRefreshing = true;
+            const formData = new FormData();
+            formData.append('device_ip', deviceIp);
+            
+            fetch('/devices/reboot', {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => {
+                if (response.redirected) {
+                    // Don't redirect - we'll just update UI
+                    this.refreshData();
+                } else {
+                    this.refreshData(); // Refresh device status after operation
+                }
+            })
+            .catch(error => {
+                console.error('Error during reboot:', error);
+                alert('Failed to reboot device');
+            })
+            .finally(() => {
+                this.isRefreshing = false;
+            });
         }
     };
 }
