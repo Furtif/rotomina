@@ -2370,7 +2370,12 @@ async def run_login_sequence(device_id: str, max_retries=3):
             # Create a temporary directory for UI dumps
             with tempfile.TemporaryDirectory() as temp_dir:
                 dump_file = Path(temp_dir) / "dump.xml"
-                
+
+                # Define multilingual button texts
+                scroll_text = ["Keep Scrolling... :point_down:", "Scroll weiter... :point_down:", 
+                               "faites défiler... :point_down:"]
+                authorize_text = ["Authorize", "Autorisieren", "Autoriser", "Autorizar", "Autorizzare"]
+                                
                 # Function to dump UI and search for a button
                 async def find_and_tap_button(button_text, max_attempts=20, sleep_interval=2):
                     for attempt in range(max_attempts):
@@ -2411,14 +2416,90 @@ async def run_login_sequence(device_id: str, max_retries=3):
                     
                     return False
                 
+                async def find_and_tap_button_multilang(device_id: str, text_variants: list, max_attempts=20, sleep_interval=2):
+                    """
+                    Finds and taps a button based on multiple text variants in different languages
+    
+                    Args:
+                        device_id: ADB device identifier
+                        text_variants: List of possible button texts in different languages
+                        max_attempts: Maximum number of attempts to find the button
+                        sleep_interval: Time to wait between attempts in seconds
+        
+                    Returns:
+                        bool: True if button was found and tapped, False otherwise
+                    """
+                    for attempt in range(max_attempts):
+                        try:
+                            # Dump UI
+                         with tempfile.TemporaryDirectory() as temp_dir:
+                                dump_file = Path(temp_dir) / "dump.xml"
+                                dump_cmd = f'adb -s {device_id} shell "uiautomator dump /sdcard/dump.xml"'
+                                subprocess.run(dump_cmd, shell=True, timeout=10, capture_output=True)
+                
+                                # Pull dump file
+                                pull_cmd = f'adb -s {device_id} pull /sdcard/dump.xml {dump_file}'
+                                subprocess.run(pull_cmd, shell=True, timeout=10, capture_output=True)
+                
+                              # Debug: On first attempt list all clickable elements
+                                if attempt == 0:
+                                    try:
+                                        tree = ET.parse(dump_file)
+                                        root = tree.getroot()
+                                        print(f"Available button texts on {device_id}:")
+                                        for elem in root.iter("node"):
+                                            text = elem.get("text", "")
+                                        if text and len(text.strip()) > 0 and elem.get("clickable") == "true":
+                                                print(f"Button found: '{text}'")
+                                    except Exception as e:
+                                        print(f"Debug output failed: {str(e)}")
+                
+                                # Parse dump file
+                                if dump_file.exists():
+                                    tree = ET.parse(dump_file)
+                                    root = tree.getroot()
+                    
+                                    # Check each language variant
+                                    for button_text in text_variants:
+                                        for elem in root.iter("node"):
+                                            if elem.get("text") == button_text and elem.get("clickable") == "true":
+                                                bounds = elem.get("bounds")
+                                                # Extract coordinates from bounds string [x1,y1][x2,y2]
+                                                match = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                                                if match:
+                                                    x1, y1, x2, y2 = map(int, match.groups())
+                                                    center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                                    
+                                                    # Tap the center of the button
+                                                    tap_cmd = f'adb -s {device_id} shell "input tap {center_x} {center_y}"'
+                                                    subprocess.run(tap_cmd, shell=True, timeout=10, capture_output=True)
+                                                    print(f"Button '{button_text}' tapped at ({center_x}, {center_y})")
+                                                    return True
+                
+                        except Exception as e:
+                            print(f"Error in find_and_tap_button_multilang: {str(e)}")
+        
+                        print(f"None of the button texts found (attempt {attempt+1}/{max_attempts})")
+                        await asyncio.sleep(sleep_interval)
+    
+                    return False
                 # Function to perform swipe
-                async def perform_swipe():
+                async def perform_swipe(device_id: str):
+                    """
+                    Performs a swipe gesture on the device to scroll content
+    
+                    Args:
+                        device_id: ADB device identifier
+        
+                    Returns:
+                        bool: True if swipe was successful, False otherwise
+                    """
                     try:
                         # Get screen size
                         size_cmd = f'adb -s {device_id} shell wm size'
                         result = subprocess.run(size_cmd, shell=True, timeout=10, capture_output=True, text=True)
                         output = result.stdout
-                        
+        
                         # Parse screen size
                         override_match = re.search(r'Override size:\s*(\d+)x(\d+)', output)
                         if override_match:
@@ -2426,29 +2507,29 @@ async def run_login_sequence(device_id: str, max_retries=3):
                         else:
                             physical_match = re.search(r'Physical size:\s*(\d+)x(\d+)', output)
                             if physical_match:
-                                width, height = map(int, physical_match.groups())
+                              width, height = map(int, physical_match.groups())
                             else:
                                 # Default values if parsing fails
                                 width, height = 1080, 1920
-                        
+        
                         # Calculate swipe coordinates
                         start_x = int(width * 0.5)
                         start_y = int(height * 0.75)
                         end_x = int(width * 0.5)
-                        end_y = int(height * 0.05)
-                        
+                        end_y = int(height * 0.25)  # Swipe higher for longer pages
+        
                         # Perform swipe
                         swipe_cmd = f'adb -s {device_id} shell "input swipe {start_x} {start_y} {end_x} {end_y} 500"'
                         subprocess.run(swipe_cmd, shell=True, timeout=10, capture_output=True)
-                        print(f"Performed swipe from ({start_x}, {start_y}) to ({end_x}, {end_y})")
-                        
+                        print(f"Swipe performed from ({start_x}, {start_y}) to ({end_x}, {end_y})")
+        
                         return True
                     except Exception as e:
-                        print(f"Error performing swipe: {str(e)}")
+                        print(f"Swipe error: {str(e)}")
                         return False
                 
                 # Check PID function
-                async def check_app_pids():
+                async def check_app_pids(device_id: str):
                     try:
                         # Check PIDs for both apps
                         pogo_pid_cmd = f'adb -s {device_id} shell "pidof com.nianticlabs.pokemongo"'
@@ -2473,14 +2554,14 @@ async def run_login_sequence(device_id: str, max_retries=3):
                     await asyncio.sleep(3)
                     
                     # Check for Keep Scrolling... :point_down: button (might appear in some cases)
-                    if await find_and_tap_button("Keep Scrolling... :point_down:", max_attempts=5):
+                    if await find_and_tap_button_multilang(device_id, scroll_text, max_attempts=5):
                         await asyncio.sleep(1)
                     
                     # Perform swipe in case content needs scrolling
-                    await perform_swipe()
+                    await perform_swipe(device_id)
                     await asyncio.sleep(2)
                     
-                    if await find_and_tap_button("Authorize"):
+                    if await find_and_tap_button_multilang(device_id, authorize_text):
                         await asyncio.sleep(3)
                         
                         if await find_and_tap_button("Recheck Service Status"):
@@ -2492,7 +2573,7 @@ async def run_login_sequence(device_id: str, max_retries=3):
                                 await asyncio.sleep(30)
                                 
                                 # Check if both apps are running
-                                if await check_app_pids():
+                                if await check_app_pids(device_id):
                                     print(f"Login sequence completed successfully on {device_id}")
                                     return True
                                 else:
