@@ -2372,8 +2372,7 @@ async def run_login_sequence(device_id: str, max_retries=3):
                 dump_file = Path(temp_dir) / "dump.xml"
 
                 # Define multilingual button texts
-                scroll_text = ["Keep Scrolling... :point_down:", "Scroll weiter... :point_down:", 
-                               "faites défiler... :point_down:"]
+                scroll_text = ["Keep Scrolling... :point_down:"]
                 authorize_text = ["Authorize", "Autorisieren", "Autoriser", "Autorizar", "Autorizzare"]
                                 
                 # Function to dump UI and search for a button
@@ -2416,23 +2415,26 @@ async def run_login_sequence(device_id: str, max_retries=3):
                     
                     return False
                 
-                async def find_and_tap_button_multilang(device_id: str, text_variants: list, max_attempts=20, sleep_interval=2):
+                # Enhanced find_and_tap_button_multilang function with suffix search capability
+                async def find_and_tap_button_multilang(device_id: str, text_variants: list, max_attempts=20, sleep_interval=2, text_suffix=None):
                     """
                     Finds and taps a button based on multiple text variants in different languages
+                    or by searching for a specific suffix in button text.
     
                     Args:
                         device_id: ADB device identifier
                         text_variants: List of possible button texts in different languages
                         max_attempts: Maximum number of attempts to find the button
                         sleep_interval: Time to wait between attempts in seconds
-        
+                        text_suffix: Optional suffix to search for in button texts (e.g., ":point_down:")
+    
                     Returns:
                         bool: True if button was found and tapped, False otherwise
                     """
                     for attempt in range(max_attempts):
                         try:
                             # Dump UI
-                         with tempfile.TemporaryDirectory() as temp_dir:
+                            with tempfile.TemporaryDirectory() as temp_dir:
                                 dump_file = Path(temp_dir) / "dump.xml"
                                 dump_cmd = f'adb -s {device_id} shell "uiautomator dump /sdcard/dump.xml"'
                                 subprocess.run(dump_cmd, shell=True, timeout=10, capture_output=True)
@@ -2441,7 +2443,7 @@ async def run_login_sequence(device_id: str, max_retries=3):
                                 pull_cmd = f'adb -s {device_id} pull /sdcard/dump.xml {dump_file}'
                                 subprocess.run(pull_cmd, shell=True, timeout=10, capture_output=True)
                 
-                              # Debug: On first attempt list all clickable elements
+                                # Debug: On first attempt list all clickable elements
                                 if attempt == 0:
                                     try:
                                         tree = ET.parse(dump_file)
@@ -2449,7 +2451,7 @@ async def run_login_sequence(device_id: str, max_retries=3):
                                         print(f"Available button texts on {device_id}:")
                                         for elem in root.iter("node"):
                                             text = elem.get("text", "")
-                                        if text and len(text.strip()) > 0 and elem.get("clickable") == "true":
+                                            if text and len(text.strip()) > 0 and elem.get("clickable") == "true":
                                                 print(f"Button found: '{text}'")
                                     except Exception as e:
                                         print(f"Debug output failed: {str(e)}")
@@ -2459,30 +2461,47 @@ async def run_login_sequence(device_id: str, max_retries=3):
                                     tree = ET.parse(dump_file)
                                     root = tree.getroot()
                     
-                                    # Check each language variant
-                                    for button_text in text_variants:
-                                        for elem in root.iter("node"):
-                                            if elem.get("text") == button_text and elem.get("clickable") == "true":
-                                                bounds = elem.get("bounds")
-                                                # Extract coordinates from bounds string [x1,y1][x2,y2]
-                                                match = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
-                                                if match:
-                                                    x1, y1, x2, y2 = map(int, match.groups())
-                                                    center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
-                                    
-                                                    # Tap the center of the button
-                                                    tap_cmd = f'adb -s {device_id} shell "input tap {center_x} {center_y}"'
-                                                    subprocess.run(tap_cmd, shell=True, timeout=10, capture_output=True)
-                                                    print(f"Button '{button_text}' tapped at ({center_x}, {center_y})")
-                                                    return True
-                
+                                    # Check each language variant or for suffix match
+                                    for elem in root.iter("node"):
+                                        elem_text = elem.get("text", "")
+                                        is_clickable = elem.get("clickable") == "true"
+                        
+                                        # Skip if not clickable or no text
+                                        if not is_clickable or not elem_text:
+                                            continue
+                            
+                                        # Case 1: Direct match with one of the text variants
+                                        direct_match = elem_text in text_variants
+                        
+                                        # Case 2: If suffix is provided, check if text contains suffix
+                                        suffix_match = text_suffix and text_suffix in elem_text
+                        
+                                        if direct_match or suffix_match:
+                                            bounds = elem.get("bounds")
+                                            # Extract coordinates from bounds string [x1,y1][x2,y2]
+                                            match = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                                            if match:
+                                                x1, y1, x2, y2 = map(int, match.groups())
+                                                center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                                
+                                                # Tap the center of the button
+                                                tap_cmd = f'adb -s {device_id} shell "input tap {center_x} {center_y}"'
+                                                subprocess.run(tap_cmd, shell=True, timeout=10, capture_output=True)
+                                
+                                                if suffix_match:
+                                                    print(f"Button with suffix '{text_suffix}' tapped at ({center_x}, {center_y}): '{elem_text}'")
+                                                else:
+                                                    print(f"Button '{elem_text}' tapped at ({center_x}, {center_y})")
+                                                return True
+                                
                         except Exception as e:
                             print(f"Error in find_and_tap_button_multilang: {str(e)}")
         
-                        print(f"None of the button texts found (attempt {attempt+1}/{max_attempts})")
+                        print(f"No matching button found (attempt {attempt+1}/{max_attempts})")
                         await asyncio.sleep(sleep_interval)
     
                     return False
+                
                 # Function to perform swipe
                 async def perform_swipe(device_id: str):
                     """
@@ -2554,7 +2573,7 @@ async def run_login_sequence(device_id: str, max_retries=3):
                     await asyncio.sleep(3)
                     
                     # Check for Keep Scrolling... :point_down: button (might appear in some cases)
-                    if await find_and_tap_button_multilang(device_id, scroll_text, max_attempts=5):
+                    if await find_and_tap_button_multilang(device_id, scroll_text, max_attempts=5, text_suffix=":point_down:"):
                         await asyncio.sleep(1)
                     
                     # Perform swipe in case content needs scrolling
