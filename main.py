@@ -2278,12 +2278,12 @@ def parse_version(v: str):
 # Optimized Device Monitoring
 async def optimized_device_monitoring():
     """
-    Optimized device monitoring with enhanced terminal output showing
-    API status, memory values, and runtime information.
-    Includes Discord notifications for status changes.
+    Optimized device monitoring with fixed notification logic to ensure
+    both offline and online notifications are properly sent.
     """
     device_last_status = {}  # Track previous status for change detection
     monitoring_interval = 60  # seconds
+    notification_cooldown = 300  # seconds (5 minutes) between repeated notifications
     
     while True:
         try:
@@ -2320,13 +2320,49 @@ async def optimized_device_monitoring():
                 runtime = status.get("runtime", None)
                 last_runtime = status.get("last_runtime", None)
                 
-                # Check for status change to send notifications
-                was_alive = device_last_status.get(device_id, {}).get("is_alive", True)
+                # Get notification timestamps to prevent spam
+                last_offline_notification = status.get("last_offline_notification", 0)
+                last_online_notification = status.get("last_online_notification", 0)
                 
-                # Device just went offline - send notification
+                # Get last known status of the device 
+                was_alive = device_last_status.get(device_id, {}).get("is_alive")
+                
+                # If we don't have previous status (first run), assume null state
+                if was_alive is None:
+                    # Initialize status without sending notifications
+                    device_last_status[device_id] = {"is_alive": is_alive}
+                    print(f"Initialized status tracking for {device_id}: is_alive={is_alive}")
+                    # Store this status in cache without notification
+                    status["last_status_change"] = current_time
+                    device_status_cache[device_id] = status
+                    continue
+                
+                # Check for status change to send notifications
+                # Device just went offline
                 if was_alive and not is_alive:
-                    print(f"Device {display_name} ({device_id}) went offline - sending notification")
-                    await notify_device_offline(display_name, device_id)
+                    # Check if we need to send notification (respect cooldown)
+                    if current_time - last_offline_notification > notification_cooldown:
+                        print(f"Device {display_name} ({device_id}) went offline - sending notification")
+                        await notify_device_offline(display_name, device_id)
+                        
+                        # Update notification timestamp
+                        status["last_offline_notification"] = current_time
+                        device_status_cache[device_id] = status
+                    else:
+                        print(f"Device {display_name} ({device_id}) offline notification in cooldown")
+                
+                # Device just came back online
+                elif not was_alive and is_alive:
+                    # Check if we need to send notification (respect cooldown)
+                    if current_time - last_online_notification > notification_cooldown:
+                        print(f"Device {display_name} ({device_id}) came back online - sending notification")
+                        await notify_device_online(display_name, device_id)
+                        
+                        # Update notification timestamp
+                        status["last_online_notification"] = current_time
+                        device_status_cache[device_id] = status
+                    else:
+                        print(f"Device {display_name} ({device_id}) online notification in cooldown")
                 
                 # Format runtime for display
                 runtime_formatted = format_runtime(runtime) if runtime is not None else "N/A"
@@ -2373,8 +2409,13 @@ async def optimized_device_monitoring():
                     if mem_free < critical_minimum:
                         restart_needed = True
                         restart_reason = f"Critical low memory: {mem_mb:.2f} MB (Threshold: {threshold} MB, Critical: {critical_minimum/1024:.2f} MB)"
-                        # Send memory restart notification to Discord
-                        await notify_memory_restart(display_name, device_id, mem_free, threshold)
+                        
+                        # Check notification cooldown for memory restart
+                        last_memory_notification = status.get("last_memory_notification", 0)
+                        if current_time - last_memory_notification > notification_cooldown:
+                            await notify_memory_restart(display_name, device_id, mem_free, threshold)
+                            status["last_memory_notification"] = current_time
+                            device_status_cache[device_id] = status
                     else:
                         # Memory is below threshold but not critically low
                         print(f"  - Memory is below threshold but not critically low")
@@ -2399,16 +2440,20 @@ async def optimized_device_monitoring():
                     
                     if success:
                         print(f"  - Successfully restarted apps")
+                        # Important: Update the status in the cache
                         device_status_cache[device_id]["is_alive"] = True
                         
-                        # Update device online status and send notification
+                        # This is a system restart, not a status change from the API
+                        # If it was offline before, we should send "back online" notification
                         if not was_alive:
+                            print(f"  - Sending online notification after successful restart")
                             await notify_device_online(display_name, device_id)
-                            print(f"  - Sent online notification for {device_id}")
+                            status["last_online_notification"] = current_time
+                            device_status_cache[device_id] = status
                     else:
                         print(f"  - Failed to restart apps")
                 
-                # Track status for next comparison
+                # Always update last status to track changes
                 device_last_status[device_id] = {
                     "is_alive": is_alive
                 }
