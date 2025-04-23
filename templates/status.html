@@ -84,6 +84,14 @@
                                 </svg>
                             </span>
                         </th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('runtime')">
+                            Runtime
+                            <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'runtime' }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" x-show="sortConfig.key === 'runtime'">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+                                </svg>
+                            </span>
+                        </th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider cursor-pointer" @click="sortTable('control')">
                             Control
                             <span class="inline-block ml-1" :class="{ 'rotate-180': sortConfig.direction === 'desc' && sortConfig.key === 'control' }">
@@ -156,6 +164,17 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                                 <span x-text="device.is_alive ? '✅' : '❌'" :class="device.is_alive ? 'text-green-500' : 'text-red-500'"></span>
+                            </td>
+                            <!-- New Runtime column -->
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                <div class="relative group">
+                                    <span x-text="formatRuntime(device.runtime)"></span>
+                                    <template x-if="device.last_runtime && device.last_runtime > 60">
+                                        <div class="absolute z-10 invisible group-hover:visible bg-gray-900 text-white text-xs rounded py-1 px-2 -mt-8 ml-4">
+                                            Last: <span x-text="formatRuntime(device.last_runtime)"></span>
+                                        </div>
+                                    </template>
+                                </div>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                                 <span class="px-2 py-1 text-xs rounded-full" :class="device.control_enabled ? 'bg-green-900/50 text-green-400' : 'bg-gray-800 text-gray-400'" x-text="device.control_enabled ? 'Active' : 'Inactive'"></span>
@@ -442,6 +461,18 @@ function statusPage() {
             return `${memGB.toFixed(2).replace('.', ',')} GB`;
         },
         
+        // Format runtime value
+        formatRuntime(seconds) {
+            if (!seconds || seconds <= 0) {
+                return "N/A";
+            }
+            
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            
+            return `${hours}h ${minutes}m`;
+        },
+        
         // Format date for PIF versions
         formatDate(dateString) {
             try {
@@ -493,6 +524,12 @@ function statusPage() {
                         aValue = a.control_enabled;
                         bValue = b.control_enabled;
                         return multiplier * (bValue === aValue ? 0 : aValue ? -1 : 1);
+                        
+                    case 'runtime':
+                        // Runtime is in seconds
+                        aValue = a.runtime || 0;
+                        bValue = b.runtime || 0;
+                        return multiplier * (aValue - bValue);
                         
                     case 'pogo':
                     case 'mitm':
