@@ -1099,17 +1099,24 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
     temp_dir = Path(tempfile.mkdtemp())
     
     try:
+        # Keep track of scroll button coordinates across function calls
+        scroll_button_coords = None
+        
         # Create a reusable function for UI interaction
         async def find_and_tap_element(search_terms: list, max_attempts: int = 5, 
-                                       wait_time: int = 2, partial_match: bool = False,
-                                       text_suffix: str = None):  # Added text_suffix parameter
+                                      wait_time: int = 2, partial_match: bool = False,
+                                      text_suffix: str = None):
             """Searches UI dump for elements matching search terms and taps them"""
+            nonlocal scroll_button_coords
             dump_file = temp_dir / "dump.xml"
+            
+            # Check if we're looking for Authorize button
+            is_authorize_search = any(term in ["Authorize", "Authorise", "Autorisieren", "Autoriser", "Autorizar", "Autorizzare"] for term in search_terms)
             
             for attempt in range(max_attempts):
                 # Get UI dump with direct file pull instead of parsing stdout
                 try:
-                    # First, generate the UI dump
+                    # First, generate the UI dump - fresh dump for each attempt
                     dump_cmd = 'uiautomator dump /sdcard/dump.xml'
                     dump_result = adb_pool.execute_command(device_id, ["adb", "shell", dump_cmd])
                     
@@ -1136,7 +1143,7 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
                         await asyncio.sleep(wait_time)
                         continue
                     
-                    # Debug (first attempt only)
+                    # Debug output
                     if attempt == 0:
                         clickable_elements = []
                         for elem in root.iter("node"):
@@ -1147,6 +1154,26 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
                             print(f"Clickable elements found: {', '.join(clickable_elements)}")
                         else:
                             print("No clickable elements found in UI dump")
+                    
+                    # Look for the "Keep Scrolling" button
+                    for elem in root.iter("node"):
+                        if elem.get("clickable") != "true":
+                            continue
+                            
+                        elem_text = elem.get("text", "")
+                        if not elem_text:
+                            continue
+                            
+                        if ":point_down:" in elem_text or "Keep Scrolling" in elem_text:
+                            # Save coordinates for potential fallback
+                            bounds = elem.get("bounds", "")
+                            match = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+                            if match:
+                                x1, y1, x2, y2 = map(int, match.groups())
+                                center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+                                scroll_button_coords = (center_x, center_y)
+                                print(f"Found 'Keep Scrolling' button at {scroll_button_coords}")
+                                break
                     
                     # Search for matches
                     for elem in root.iter("node"):
@@ -1191,7 +1218,18 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
                 # Wait before next attempt
                 await asyncio.sleep(wait_time)
             
+            # If we get here, we couldn't find the element after max_attempts
             print(f"Failed to find elements matching: {search_terms}")
+            
+            # Fallback for Authorize button only
+            if is_authorize_search and scroll_button_coords:
+                print(f"Using FALLBACK: Directly tapping at scroll button coordinates: {scroll_button_coords}")
+                center_x, center_y = scroll_button_coords
+                tap_cmd = f'input tap {center_x} {center_y}'
+                result = adb_pool.execute_command(device_id, ["adb", "shell", tap_cmd])
+                print(f"Fallback tap result: {result.returncode}")
+                return True
+                
             return False
             
         # Create a reusable function for swipe gesture
@@ -1234,81 +1272,6 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
             
             return pogo_running and mitm_running
         
-        # Fallback function for blind tapping known positions
-        async def blind_login_sequence():
-            """
-            Fallback for when UI parsing fails - taps common positions for login sequence
-            based on known coordinates for common screen resolutions
-            """
-            print("Attempting blind login sequence as fallback")
-            
-            # Get screen size
-            size_cmd = 'wm size'
-            result = adb_pool.execute_command(device_id, ["adb", "shell", size_cmd])
-            
-            # Parse dimensions
-            width, height = 1080, 1920  # Default fallback
-            override_match = re.search(r'Override size:\s*(\d+)x(\d+)', result.stdout)
-            if override_match:
-                width, height = map(int, override_match.groups())
-            else:
-                physical_match = re.search(r'Physical size:\s*(\d+)x(\d+)', result.stdout)
-                if physical_match:
-                    width, height = map(int, physical_match.groups())
-            
-            print(f"Screen size detected: {width}x{height}")
-            
-            # Common positions of buttons based on percentage of screen
-            # Discord Login - typically in the center
-            discord_login_x = int(width * 0.5)
-            discord_login_y = int(height * 0.5)
-            
-            # Authorize button - typically in bottom half
-            authorize_x = int(width * 0.5)
-            authorize_y = int(height * 0.7)
-            
-            # Recheck service button - typical position
-            recheck_x = int(width * 0.5)
-            recheck_y = int(height * 0.4)
-            
-            # Start service button - typical position
-            start_service_x = int(width * 0.5)
-            start_service_y = int(height * 0.6)
-            
-            # Try tapping each position with delays
-            print("Blind tap: Discord Login")
-            tap_cmd = f'input tap {discord_login_x} {discord_login_y}'
-            adb_pool.execute_command(device_id, ["adb", "shell", tap_cmd])
-            await asyncio.sleep(5)
-            
-            # Perform swipe in case scrolling is needed
-            await perform_swipe()
-            await asyncio.sleep(1)
-            
-            # Authorize
-            print("Blind tap: Authorize")
-            tap_cmd = f'input tap {authorize_x} {authorize_y}'
-            adb_pool.execute_command(device_id, ["adb", "shell", tap_cmd])
-            await asyncio.sleep(2)
-            
-            # Recheck service
-            print("Blind tap: Recheck Service")
-            tap_cmd = f'input tap {recheck_x} {recheck_y}'
-            adb_pool.execute_command(device_id, ["adb", "shell", tap_cmd])
-            await asyncio.sleep(1)
-            
-            # Start service
-            print("Blind tap: Start Service")
-            tap_cmd = f'input tap {start_service_x} {start_service_y}'
-            adb_pool.execute_command(device_id, ["adb", "shell", tap_cmd])
-            print("Blind login sequence completed, waiting for apps to initialize...")
-            
-            # Allow time for apps to start
-            await asyncio.sleep(30)
-            
-            # Check if apps are running
-            return await check_apps_running()
-            
         # Execute login sequence with improved error handling
         for retry in range(max_retries):
             print(f"Login sequence attempt {retry+1}/{max_retries} for {device_id}")
@@ -1317,7 +1280,7 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
             discord_login_success = await find_and_tap_element(["Discord Login"])
             
             if discord_login_success:
-                await asyncio.sleep(5)
+                await asyncio.sleep(10)
                 
                 # Step 2: Find and handle scroll/authorize buttons
                 scroll_text = ["Keep Scrolling... :point_down:"]
@@ -1326,20 +1289,20 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
                 
                 # Step 3: Perform swipe
                 await perform_swipe()
-                await asyncio.sleep(1)
+                await asyncio.sleep(5)
                 
-                # Step 4: Find Authorize button
+                # Step 4: Find Authorize button with extended matching
                 authorize_text = ["Authorize", "Authorise", "Autorisieren", "Autoriser", "Autorizar", "Autorizzare"]
-                authorize_success = await find_and_tap_element(authorize_text, partial_match=True)
+                authorize_success = await find_and_tap_element(authorize_text, max_attempts=3, partial_match=True)
                 
                 if authorize_success:
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(3)  # Increased wait time
                     
                     # Step 5: Recheck Service Status
                     recheck_success = await find_and_tap_element(["Recheck Service Status"])
                     
                     if recheck_success:
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(2)  # Increased wait time
                         
                         # Step 6: Start service
                         start_success = await find_and_tap_element(["Start service"])
@@ -1352,12 +1315,6 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
                             if await check_apps_running():
                                 print(f"Login sequence completed successfully on {device_id}")
                                 return True
-            
-            # If we get here, try the blind tap approach as fallback
-            print(f"UI-based login failed on attempt {retry+1}, trying blind taps")
-            if await blind_login_sequence():
-                print(f"Blind login sequence succeeded on {device_id}")
-                return True
             
             # If we get here, retry is needed
             if retry < max_retries - 1:
@@ -1383,7 +1340,7 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
     finally:
         # Clean up
         shutil.rmtree(temp_dir, ignore_errors=True)
-
+        
 # APK Management with UnownHash Mirror
 @ttl_cache(ttl=3600)
 def get_available_versions() -> Dict:
@@ -1520,16 +1477,16 @@ def unzip_apk(apk_path: Path, extract_dir: Path):
         raise
 
 # Optimized APK Installation
-async def optimized_apk_installation(device_id: str, apk_files: list) -> bool:
+async def optimized_apk_installation(device_id: str, apk_files: list) -> tuple[bool, str]:
     """
-    Optimized APK installation that minimizes ADB connections and commands.
+    Optimized APK installation with improved error detection.
     
     Args:
         device_id: Device identifier
         apk_files: List of APK files to install
         
     Returns:
-        bool: True if installation was successful
+        tuple: (success, error_message)
     """
     device_id = format_device_id(device_id)
     
@@ -1537,8 +1494,7 @@ async def optimized_apk_installation(device_id: str, apk_files: list) -> bool:
         print(f"Starting optimized APK installation for {device_id}")
         
         if not adb_pool.ensure_connected(device_id):
-            print(f"Cannot connect to {device_id} for APK installation")
-            return False
+            return False, "Cannot connect to device"
             
         # Single APK case - direct install
         if len(apk_files) == 1:
@@ -1549,11 +1505,22 @@ async def optimized_apk_installation(device_id: str, apk_files: list) -> bool:
             )
             
             if result.returncode != 0:
-                print(f"APK installation failed: {result.stderr}")
-                return False
+                error_msg = result.stderr
                 
+                # Detect specific error types
+                if "INSTALL_FAILED_INSUFFICIENT_STORAGE" in error_msg:
+                    print(f"Insufficient storage on {device_id} for APK installation")
+                    return False, "INSUFFICIENT_STORAGE"
+                elif "INSTALL_FAILED_ALREADY_EXISTS" in error_msg:
+                    return False, "ALREADY_EXISTS"
+                elif "INSTALL_FAILED_VERSION_DOWNGRADE" in error_msg:
+                    return False, "VERSION_DOWNGRADE"
+                else:
+                    print(f"APK installation failed: {error_msg}")
+                    return False, f"INSTALLATION_ERROR: {error_msg}"
+                    
             print(f"APK installed successfully on {device_id}")
-            return True
+            return True, "SUCCESS"
             
         # Multiple APK case
         print(f"Installing multiple APKs: {len(apk_files)} files")
@@ -1563,20 +1530,101 @@ async def optimized_apk_installation(device_id: str, apk_files: list) -> bool:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode != 0:
-            print(f"Multiple APK installation failed: {result.stderr}")
-            return False
+            error_msg = result.stderr
             
+            # Also detect specific error types for multiple APKs
+            if "INSTALL_FAILED_INSUFFICIENT_STORAGE" in error_msg:
+                print(f"Insufficient storage on {device_id} for APK installation")
+                return False, "INSUFFICIENT_STORAGE"
+            else:
+                print(f"Multiple APK installation failed: {error_msg}")
+                return False, f"INSTALLATION_ERROR: {error_msg}"
+                
         print(f"Multiple APKs installed successfully on {device_id}")
-        return True
+        return True, "SUCCESS"
             
     except Exception as e:
         print(f"APK installation error for {device_id}: {str(e)}")
+        return False, f"EXCEPTION: {str(e)}"
+
+async def clear_app_cache(device_id: str) -> bool:
+    """
+    Clears Pokemon GO app cache to free up storage space.
+    
+    Args:
+        device_id: Device identifier
+        
+    Returns:
+        bool: True if cache clearing was successful
+    """
+    device_id = format_device_id(device_id)
+    
+    try:
+        print(f"Clearing Pokemon GO cache on {device_id}")
+        
+        if not adb_pool.ensure_connected(device_id):
+            print(f"Cannot connect to {device_id} for cache clearing")
+            return False
+        
+        # Clear app data and cache
+        clear_cmd = "pm clear com.nianticlabs.pokemongo"
+        result = adb_pool.execute_command(
+            device_id,
+            ["adb", "shell", clear_cmd]
+        )
+        
+        if "Success" in result.stdout:
+            print(f"Successfully cleared Pokemon GO cache on {device_id}")
+            return True
+        else:
+            print(f"Failed to clear Pokemon GO cache on {device_id}: {result.stderr}")
+            return False
+            
+    except Exception as e:
+        print(f"Error clearing cache on {device_id}: {str(e)}")
+        return False
+    
+async def uninstall_pogo(device_id: str) -> bool:
+    """
+    Uninstalls Pokemon GO to free up storage for new installation.
+    
+    Args:
+        device_id: Device identifier
+        
+    Returns:
+        bool: True if uninstallation was successful
+    """
+    device_id = format_device_id(device_id)
+    
+    try:
+        print(f"Uninstalling Pokemon GO on {device_id}")
+        
+        if not adb_pool.ensure_connected(device_id):
+            print(f"Cannot connect to {device_id} for uninstallation")
+            return False
+        
+        # Uninstall the app
+        uninstall_cmd = "pm uninstall com.nianticlabs.pokemongo"
+        result = adb_pool.execute_command(
+            device_id,
+            ["adb", "shell", uninstall_cmd]
+        )
+        
+        if "Success" in result.stdout:
+            print(f"Successfully uninstalled Pokemon GO on {device_id}")
+            return True
+        else:
+            print(f"Failed to uninstall Pokemon GO on {device_id}: {result.stderr}")
+            return False
+            
+    except Exception as e:
+        print(f"Error uninstalling app on {device_id}: {str(e)}")
         return False
 
 async def optimized_perform_installation(device_ip: str, extract_dir: Path) -> bool:
     """
-    Optimized version of the full installation process that
-    minimizes ADB commands and improves workflow.
+    Optimized version of the full installation process with
+    staged approach for handling storage issues.
     
     Args:
         device_ip: Device identifier
@@ -1590,6 +1638,9 @@ async def optimized_perform_installation(device_ip: str, extract_dir: Path) -> b
         mark_device_in_update(device_ip, "pogo")
         update_progress(10)
         
+        device_details = get_device_details(device_ip)
+        device_name = device_details.get("display_name", device_ip.split(":")[0])
+        
         # Find APK files
         apk_files = list(extract_dir.glob("*.apk"))
         if not apk_files:
@@ -1599,48 +1650,166 @@ async def optimized_perform_installation(device_ip: str, extract_dir: Path) -> b
             
         update_progress(20)
         
-        # Install APKs
-        installation_result = await optimized_apk_installation(device_ip, apk_files)
-        if not installation_result:
-            print(f"APK installation failed for {device_ip}")
+        # Extract version from directory
+        version = extract_dir.name
+        
+        # STAGE 1: Try normal installation
+        print(f"STAGE 1: Attempting normal installation on {device_ip}")
+        installation_success, error_msg = await optimized_apk_installation(device_ip, apk_files)
+        
+        # If successful, proceed with app startup
+        if installation_success:
+            print(f"Stage 1 installation successful on {device_ip}")
+            update_progress(60)
+        # If storage issue detected, proceed to Stage 2
+        elif error_msg == "INSUFFICIENT_STORAGE":
+            # STAGE 2: Clear cache and retry
+            print(f"STAGE 2: Clearing cache and retrying installation on {device_ip}")
+            update_progress(30)
+            
+            # Send notification about cache clearing attempt
+            await send_discord_notification(
+                message=f"⚠️ Insufficient storage detected on **{device_name}** ({device_ip}). Attempting to clear cache and retry installation.",
+                title="Installation Retry - Clearing Cache",
+                color=DISCORD_COLOR_ORANGE
+            )
+            
+            # Clear app cache
+            cache_cleared = await clear_app_cache(device_ip)
+            update_progress(40)
+            
+            if cache_cleared:
+                # Retry installation after cache clearing
+                installation_success, error_msg = await optimized_apk_installation(device_ip, apk_files)
+                update_progress(50)
+                
+                # If still unsuccessful and storage issue persists, go to Stage 3
+                if not installation_success and error_msg == "INSUFFICIENT_STORAGE":
+                    # STAGE 3: Uninstall and reinstall
+                    print(f"STAGE 3: Uninstalling and reinstalling on {device_ip}")
+                    update_progress(40)
+                    
+                    # Send notification about uninstall attempt
+                    await send_discord_notification(
+                        message=f"⚠️ Cache clearing insufficient on **{device_name}** ({device_ip}). Attempting to uninstall and reinstall Pokemon GO.",
+                        title="Installation Retry - Uninstalling",
+                        color=DISCORD_COLOR_ORANGE
+                    )
+                    
+                    # Uninstall the app
+                    uninstall_success = await uninstall_pogo(device_ip)
+                    update_progress(45)
+                    
+                    if uninstall_success:
+                        # Final installation attempt after uninstall
+                        installation_success, error_msg = await optimized_apk_installation(device_ip, apk_files)
+                        update_progress(55)
+                        
+                        if not installation_success:
+                            print(f"Final installation attempt failed on {device_ip}: {error_msg}")
+                            await send_discord_notification(
+                                message=f"❌ All installation attempts failed on **{device_name}** ({device_ip}). Final error: {error_msg}",
+                                title="Installation Failed",
+                                color=DISCORD_COLOR_RED
+                            )
+                            clear_device_update_status(device_ip)
+                            return False
+                    else:
+                        print(f"Failed to uninstall Pokemon GO on {device_ip}")
+                        await send_discord_notification(
+                            message=f"❌ Failed to uninstall Pokemon GO on **{device_name}** ({device_ip}). Cannot continue with installation.",
+                            title="Uninstallation Failed",
+                            color=DISCORD_COLOR_RED
+                        )
+                        clear_device_update_status(device_ip)
+                        return False
+                elif not installation_success:
+                    # Different error after cache clearing
+                    print(f"Installation failed after cache clearing on {device_ip}: {error_msg}")
+                    await send_discord_notification(
+                        message=f"❌ Installation failed after cache clearing on **{device_name}** ({device_ip}). Error: {error_msg}",
+                        title="Installation Failed",
+                        color=DISCORD_COLOR_RED
+                    )
+                    clear_device_update_status(device_ip)
+                    return False
+            else:
+                print(f"Failed to clear cache on {device_ip}")
+                await send_discord_notification(
+                    message=f"❌ Failed to clear cache on **{device_name}** ({device_ip}). Cannot continue with installation.",
+                    title="Cache Clearing Failed",
+                    color=DISCORD_COLOR_RED
+                )
+                clear_device_update_status(device_ip)
+                return False
+        else:
+            # Handle non-storage errors
+            print(f"Installation failed on {device_ip}: {error_msg}")
+            await send_discord_notification(
+                message=f"❌ Pokemon GO installation failed on **{device_name}** ({device_ip}). Error: {error_msg}",
+                title="Installation Failed",
+                color=DISCORD_COLOR_RED
+            )
             clear_device_update_status(device_ip)
             return False
+        
+        # Proceed with starting the app if any stage succeeded
+        if installation_success:
+            # Determine if app control is enabled
+            config = load_config()
+            device = next((d for d in config["devices"] if d["ip"] == device_ip), None)
+            control_enabled = device and device.get("control_enabled", False)
             
-        update_progress(60)
-        
-        # Determine if app control is enabled
-        config = load_config()
-        device = next((d for d in config["devices"] if d["ip"] == device_ip), None)
-        control_enabled = device and device.get("control_enabled", False)
-        
-        update_progress(70)
-        
-        # Start app
-        print(f"Starting app on {device_ip} after update... (Control enabled: {control_enabled})")
-        start_result = await optimized_app_start(device_ip, control_enabled)
-        
-        if start_result:
-            print(f"Successfully started app on {device_ip} after update")
-        else:
-            print(f"Failed to start app on {device_ip} after update")
+            update_progress(70)
             
-        update_progress(90)
+            # Start app
+            print(f"Starting app on {device_ip} after update... (Control enabled: {control_enabled})")
+            start_result = await optimized_app_start(device_ip, control_enabled)
+            
+            if start_result:
+                print(f"Successfully started app on {device_ip} after update")
+                # Send success notification
+                await notify_update_installed(device_name, device_ip, "Pokemon GO", version)
+            else:
+                print(f"Failed to start app on {device_ip} after update")
+                await send_discord_notification(
+                    message=f"⚠️ Pokemon GO v{version} was installed on **{device_name}** ({device_ip}) but the app could not be started.",
+                    title="Installation OK, Startup Failed",
+                    color=DISCORD_COLOR_ORANGE
+                )
+                
+            update_progress(90)
+            
+            # Clear caches
+            device_status_cache.clear()
+            version_manager.mark_for_refresh(device_ip)
+            
+            update_progress(100)
+            
+            # Update UI
+            status_data = await get_status_data()
+            await ws_manager.broadcast(status_data)
+            
+            await asyncio.sleep(2)
+            return start_result
         
-        # Clear caches
-        device_status_cache.clear()
-        version_manager.mark_for_refresh(device_ip)
-        
-        update_progress(100)
-        
-        # Update UI
-        status_data = await get_status_data()
-        await ws_manager.broadcast(status_data)
-        
-        await asyncio.sleep(2)
-        return start_result
-        
+        # This point should not be reached if everything worked correctly
+        clear_device_update_status(device_ip)
+        return False
+            
     except Exception as e:
         print(f"Installation process error for {device_ip}: {str(e)}")
+        # Notify of general errors
+        try:
+            device_details = get_device_details(device_ip)
+            device_name = device_details.get("display_name", device_ip.split(":")[0])
+            await send_discord_notification(
+                message=f"❌ Pokemon GO update on **{device_name}** ({device_ip}) failed with exception: {str(e)}",
+                title="Update Failed - Exception",
+                color=DISCORD_COLOR_RED
+            )
+        except:
+            pass
         return False
     finally:
         # Always clear update status
@@ -1819,7 +1988,25 @@ async def mapworld_update_task():
                 print("New MapWorld version available")
                 download_mapworld()
                 
-                # Rest of the update code...
+                # Install on all connected devices
+                config = load_config()
+                successful_installs = 0
+                for device in config.get("devices", []):
+                    device_ip = device["ip"]
+                    try:
+                        # Check ADB connection first
+                        connected, error = check_adb_connection(device_ip)
+                        if not connected:
+                            print(f"Skipping MapWorld installation on {device_ip}: {error}")
+                            continue
+                            
+                        print(f"Installing MapWorld update on device {device_ip}")
+                        install_mapworld(device_ip)
+                        successful_installs += 1
+                    except Exception as e:
+                        print(f"Error installing MapWorld on {device_ip}: {str(e)}")
+                
+                print(f"MapWorld installation completed on {successful_installs} devices")
         
         except Exception as e:
             print(f"Auto-update error: {str(e)}")
