@@ -408,79 +408,94 @@ class VersionManager:
                 
         return devices_to_update
     
-    def get_devices_needing_module_update(self, latest_version, module_type="fork"):
-        """
-        Finds devices needing a module update
+def get_devices_needing_module_update(self, latest_version, module_type="fork"):
+    """
+    Finds devices needing a module update
+    
+    Args:
+        latest_version: The latest available module version
+        module_type: The module type ("fork" or "fix")
         
-        Args:
-            latest_version: The latest available module version
-            module_type: The module type ("fork" or "fix")
-            
-        Returns:
-            list: List of device IDs needing update
-        """
-        config = load_config()
-        devices_to_update = []
+    Returns:
+        list: List of device IDs needing update
+    """
+    config = load_config()
+    devices_to_update = []
+    
+    print(f"Checking {len(config.get('devices', []))} devices in config for module updates")
+    
+    # Get a set of device IPs from the config for faster lookup
+    config_device_ips = {dev["ip"] for dev in config.get("devices", [])}
+    
+    for device in config.get("devices", []):
+        device_id = device["ip"]
         
-        for device in config.get("devices", []):
-            device_id = device["ip"]
+        # Skip devices that are not in the config (this is a safety check)
+        if device_id not in config_device_ips:
+            print(f"Device {device_id} not found in config, skipping update check")
+            continue
+        
+        # Check ADB connection only once per device
+        connected, error = check_adb_connection(device_id)
+        if not connected:
+            print(f"Device {device_id} not reachable via ADB, skipping update check: {error}")
+            continue
             
-            # Check ADB connection only once per device
-            connected, error = check_adb_connection(device_id)
-            if not connected:
-                print(f"Device {device_id} not reachable via ADB, skipping update check: {error}")
-                continue
-                
-            # Get version info from cache (no force refresh)
-            version_info = self.get_version_info(device_id, force_refresh=False)
+        # Get version info from cache (no force refresh)
+        version_info = self.get_version_info(device_id, force_refresh=False)
+        
+        if not version_info:
+            print(f"No version information available for {device_id}")
+            continue
             
-            if not version_info:
-                print(f"No version information available for {device_id}")
-                continue
-                
-            installed_module = version_info.get("module_version", "N/A").strip()
+        installed_module = version_info.get("module_version", "N/A").strip()
+        
+        # Determine module type and version
+        if installed_module == "N/A":
+            print(f"No Play Integrity module found on {device_id}, will install module")
+            devices_to_update.append(device_id)
+            continue
             
-            # Determine module type and version
-            if installed_module == "N/A":
-                print(f"No Play Integrity module found on {device_id}, will install module")
-                devices_to_update.append(device_id)
-                continue
-                
-            module_is_fork = "Fork" in installed_module
+        module_is_fork = "Fork" in installed_module
+        
+        # Check if module type needs to be switched
+        if (module_type == "fix" and module_is_fork) or (module_type == "fork" and not module_is_fork):
+            print(f"Device {device_id} has different module type than preferred, updating to {module_type.upper()}")
+            devices_to_update.append(device_id)
+            continue
+        
+        # Extract current version
+        if module_is_fork:
+            version_match = re.search(r'Fork\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
+        else:
+            version_match = re.search(r'Fix\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
             
-            # Check if module type needs to be switched
-            if (module_type == "fix" and module_is_fork) or (module_type == "fork" and not module_is_fork):
-                print(f"Device {device_id} has different module type than preferred, updating to {module_type.upper()}")
-                devices_to_update.append(device_id)
-                continue
+        if version_match:
+            current_version = version_match.group(1)
+            print(f"Current module version on {device_id}: {current_version}, available: {latest_version}")
             
-            # Extract current version
-            if module_is_fork:
-                version_match = re.search(r'Fork\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
-            else:
-                version_match = re.search(r'Fix\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
+            # Compare version numbers
+            try:
+                current_tuple = parse_version(current_version)
+                new_tuple = parse_version(latest_version)
                 
-            if version_match:
-                current_version = version_match.group(1)
-                print(f"Current module version on {device_id}: {current_version}, available: {latest_version}")
-                
-                # Compare version numbers
-                try:
-                    current_tuple = parse_version(current_version)
-                    new_tuple = parse_version(latest_version)
-                    
-                    if current_tuple < new_tuple:
-                        print(f"Update needed for {device_id}! Installed: {current_version}, Available: {latest_version}")
-                        devices_to_update.append(device_id)
-                    else:
-                        print(f"Device {device_id} already has latest version, skipping update")
-                except (ValueError, AttributeError):
-                    print(f"Invalid version format for comparison on {device_id}")
-            else:
-                print(f"Could not parse version from {installed_module} on {device_id}, scheduling update")
-                devices_to_update.append(device_id)
-                
-        return devices_to_update
+                if current_tuple < new_tuple:
+                    print(f"Update needed for {device_id}! Installed: {current_version}, Available: {latest_version}")
+                    devices_to_update.append(device_id)
+                else:
+                    print(f"Device {device_id} already has latest version, skipping update")
+            except (ValueError, AttributeError):
+                print(f"Invalid version format for comparison on {device_id}")
+        else:
+            print(f"Could not parse version from {installed_module} on {device_id}, scheduling update")
+            devices_to_update.append(device_id)
+    
+    print(f"Found {len(devices_to_update)} devices that need {module_type.upper()} module update")
+    
+    # Final verification that all devices to update are in the config
+    devices_to_update = [dev for dev in devices_to_update if dev in config_device_ips]
+    
+    return devices_to_update
 
 # Global instance
 version_manager = VersionManager()
@@ -1059,17 +1074,36 @@ async def optimized_app_start(device_id: str, run_login: bool = True) -> bool:
     device_id = format_device_id(device_id)
     
     try:
+        # Verify this device is in the config
+        config = load_config()
+        config_device_ips = {dev["ip"] for dev in config.get("devices", [])}
+        if device_id not in config_device_ips:
+            print(f"Warning: Device {device_id} not found in config, not starting app")
+            return False
+        
+        # Ensure ADB connection
+        if not adb_pool.ensure_connected(device_id):
+            print(f"Cannot establish ADB connection to {device_id}, app start failed")
+            return False
+        
         # Force stop both apps in one command
         stop_cmd = "am force-stop com.github.furtif.furtifformaps; am force-stop com.nianticlabs.pokemongo"
-        adb_pool.execute_command(device_id, ["adb", "shell", stop_cmd])
+        stop_result = adb_pool.execute_command(device_id, ["adb", "shell", stop_cmd])
+        
+        if stop_result.returncode != 0:
+            print(f"Warning: Failed to stop apps on {device_id}: {stop_result.stderr}")
         
         await asyncio.sleep(2)
         
         # Start Furtif app
-        adb_pool.execute_command(
+        start_result = adb_pool.execute_command(
             device_id,
             ["adb", "shell", "am start -n com.github.furtif.furtifformaps/com.github.furtif.furtifformaps.MainActivity"]
         )
+        
+        if start_result.returncode != 0:
+            print(f"Failed to start MITM app on {device_id}: {start_result.stderr}")
+            return False
         
         if not run_login:
             return True
@@ -1078,8 +1112,15 @@ async def optimized_app_start(device_id: str, run_login: bool = True) -> bool:
         await asyncio.sleep(5)
         
         # Execute login sequence with reduced ADB calls
-        return await optimized_login_sequence(device_id)
+        login_success = await optimized_login_sequence(device_id)
         
+        if login_success:
+            print(f"Successfully started and logged into apps on {device_id}")
+            return True
+        else:
+            print(f"App started but login sequence failed on {device_id}")
+            return False
+            
     except Exception as e:
         print(f"Error in optimized app start for {device_id}: {str(e)}")
         return False
@@ -1852,8 +1893,14 @@ async def optimized_pogo_update_task():
             version_extract_dir = EXTRACT_DIR / latest_version
             unzip_apk(apk_file, version_extract_dir)
             
+            # Get config device IPs for filtering
+            config_device_ips = {dev["ip"] for dev in config.get("devices", [])}
+            
             # Find devices needing update - OPTIMIZED: Uses VersionManager
             devices_to_update = version_manager.get_devices_needing_pogo_update(latest_version)
+            
+            # Filter devices not in config
+            devices_to_update = [dev for dev in devices_to_update if dev in config_device_ips]
             
             update_count = len(devices_to_update)
             if update_count > 0:
@@ -1972,7 +2019,7 @@ def install_mapworld(device_ip: str):
         print(f"Installation error {device_ip}: {str(e)}")
 
 async def mapworld_update_task():
-    """Automatic update check every 3 hours"""
+    """Automatic update check every 1 hours"""
     # Wait a bit to let the application start up first
     await asyncio.sleep(30)
     
@@ -2011,7 +2058,7 @@ async def mapworld_update_task():
         except Exception as e:
             print(f"Auto-update error: {str(e)}")
         
-        await asyncio.sleep(3 * 3600)
+        await asyncio.sleep(3600)
 
 async def scheduled_update_task():
     """
@@ -2331,7 +2378,19 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         device_id = format_device_id(device_ip)
         print(f"Starting {module_type.upper()} module installation for {device_ip}")
         
-        update_progress(65)
+        update_progress(5)
+        
+        # Verify this device is in the config
+        config = load_config()
+        device_in_config = any(dev["ip"] == device_id for dev in config.get("devices", []))
+        if not device_in_config:
+            print(f"Device {device_id} not found in config, aborting module installation")
+            update_in_progress = False
+            current_progress = 0
+            clear_device_update_status(device_ip)
+            return False
+        
+        update_progress(10)
         
         if not adb_pool.ensure_connected(device_id):
             print(f"Cannot connect to {device_id} for module installation")
@@ -2356,7 +2415,7 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         device_details = get_device_details(device_ip)
         device_name = device_details.get("display_name", device_ip.split(":")[0])
 
-        update_progress(70)
+        update_progress(15)
         
         # Remove existing modules
         adb_pool.execute_command(
@@ -2368,54 +2427,154 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
             ["adb", "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfork'"]
         )
         
-        update_progress(75)
+        update_progress(20)
         print(f"First reboot for {device_id}")
         
         adb_pool.execute_command(device_id, ["adb", "reboot"])
         
         print(f"Device {device_id} rebooting. Waiting for it to come back online...")
-        for i in range(12):
+        device_back_online = False
+        for i in range(30):  # Increased timeout to 5 minutes
             await asyncio.sleep(10)
-            update_progress(75 + (i * 0.5))
+            update_progress(20 + (i * 1))
             try:
                 if adb_pool.ensure_connected(device_id):
-                    print(f"Device {device_id} is back online")
+                    print(f"Device {device_id} is back online after first reboot")
+                    device_back_online = True
                     break
-            except:
+            except Exception as e:
+                print(f"Error checking device connectivity: {str(e)}")
                 continue
         
-        update_progress(82)
+        if not device_back_online:
+            print(f"Device {device_id} did not come back online after reboot, aborting installation")
+            update_in_progress = False
+            current_progress = 0
+            clear_device_update_status(device_ip)
+            return False
+        
+        update_progress(50)
         print(f"Pushing {module_type.upper()} module to {device_id}")
         
-        adb_pool.execute_command(
+        push_result = adb_pool.execute_command(
             device_id,
             ["adb", "push", str(module_path), "/data/local/tmp/pif.zip"]
         )
         
-        update_progress(85)
+        if push_result.returncode != 0:
+            print(f"Failed to push module to device: {push_result.stderr}")
+            update_in_progress = False
+            current_progress = 0
+            clear_device_update_status(device_ip)
+            return False
+        
+        update_progress(60)
         print(f"Installing {module_type.upper()} module on {device_id}")
         
-        adb_pool.execute_command(
+        # First check if Magisk is installed and available
+        magisk_check = adb_pool.execute_command(
+            device_id,
+            ["adb", "shell", "su -c 'magisk -v'"]
+        )
+        
+        if magisk_check.returncode != 0 or "not found" in magisk_check.stderr:
+            print(f"Magisk not available on device {device_id}: {magisk_check.stderr}")
+            update_in_progress = False
+            current_progress = 0
+            clear_device_update_status(device_ip)
+            return False
+        
+        # Now install the module
+        install_result = adb_pool.execute_command(
             device_id,
             ["adb", "shell", "su -c 'magisk --install-module /data/local/tmp/pif.zip'"]
         )
         
-        update_progress(90)
+        if install_result.returncode != 0:
+            print(f"Module installation failed: {install_result.stderr}")
+            update_in_progress = False
+            current_progress = 0
+            clear_device_update_status(device_ip)
+            return False
         
+        update_progress(70)
+        
+        # Verify module was installed
+        module_dir = "/data/adb/modules/playintegrityfork" if module_type == "fork" else "/data/adb/modules/playintegrityfix"
+        verify_result = adb_pool.execute_command(
+            device_id,
+            ["adb", "shell", f"su -c 'ls -la {module_dir}'"]
+        )
+        
+        if verify_result.returncode != 0 or "No such file" in verify_result.stderr:
+            print(f"Module directory not found after installation: {verify_result.stderr}")
+            update_in_progress = False
+            current_progress = 0
+            clear_device_update_status(device_ip)
+            return False
+        
+        # Clean up
         adb_pool.execute_command(
             device_id,
             ["adb", "shell", "rm /data/local/tmp/pif.zip"]
         )
         
-        update_progress(95)
+        update_progress(80)
         print(f"Final reboot for {device_id} to apply {module_type.upper()} module")
         
         adb_pool.execute_command(device_id, ["adb", "reboot"])
 
+        # Wait for device to come back online after final reboot
+        print(f"Waiting for device {device_id} to come back online after final reboot...")
+        device_back_online = False
+        for i in range(30):  # Increased timeout to 5 minutes
+            await asyncio.sleep(10)
+            update_progress(80 + (i * 0.5))
+            try:
+                if adb_pool.ensure_connected(device_id):
+                    print(f"Device {device_id} is back online after final reboot")
+                    device_back_online = True
+                    break
+            except Exception as e:
+                print(f"Error checking device connectivity: {str(e)}")
+                continue
+                
+        if not device_back_online:
+            print(f"Device {device_id} did not come back online after final reboot. Installation status uncertain.")
+            update_in_progress = False
+            current_progress = 0
+            clear_device_update_status(device_ip)
+            return False
+            
+        # Verify module is actually enabled
+        await asyncio.sleep(10)  # Give a moment for the system to stabilize
+        
+        # Final verification
+        final_verify = adb_pool.execute_command(
+            device_id,
+            ["adb", "shell", f"su -c 'cat {module_dir}/module.prop'"]
+        )
+        
+        if final_verify.returncode != 0 or "No such file" in final_verify.stderr:
+            print(f"Module appears to be not properly installed after reboot: {final_verify.stderr}")
+            update_in_progress = False
+            current_progress = 0
+            clear_device_update_status(device_ip)
+            return False
+            
+        module_enabled = adb_pool.execute_command(
+            device_id,
+            ["adb", "shell", f"su -c '[ -f {module_dir}/disable ] && echo disabled || echo enabled'"]
+        )
+        
+        if "disabled" in module_enabled.stdout:
+            print(f"Warning: Module is installed but appears to be disabled")
+        
         device_status_cache.clear()
         version_manager.mark_for_refresh(device_id)
-        print(f"{module_type.upper()} update complete for {device_id}")
+        print(f"{module_type.upper()} update successfully completed for {device_id}")
 
+        # Now that we've verified installation, send notification
         module_name = "PlayIntegrityFork" if module_type == "fork" else "PlayIntegrityFix"
         await notify_update_installed(device_name, device_id, module_name, version)
         
