@@ -409,93 +409,93 @@ class VersionManager:
         return devices_to_update
     
 def get_devices_needing_module_update(self, latest_version, module_type="fork"):
-    """
-    Finds devices needing a module update
-    
-    Args:
-        latest_version: The latest available module version
-        module_type: The module type ("fork" or "fix")
+        """
+        Finds devices needing a module update
         
-    Returns:
-        list: List of device IDs needing update
-    """
-    config = load_config()
-    devices_to_update = []
-    
-    print(f"Checking {len(config.get('devices', []))} devices in config for module updates")
-    
-    # Get a set of device IPs from the config for faster lookup
-    config_device_ips = {dev["ip"] for dev in config.get("devices", [])}
-    
-    for device in config.get("devices", []):
-        device_id = device["ip"]
-        
-        # Skip devices that are not in the config (this is a safety check)
-        if device_id not in config_device_ips:
-            print(f"Device {device_id} not found in config, skipping update check")
-            continue
-        
-        # Check ADB connection only once per device
-        connected, error = check_adb_connection(device_id)
-        if not connected:
-            print(f"Device {device_id} not reachable via ADB, skipping update check: {error}")
-            continue
+        Args:
+            latest_version: The latest available module version
+            module_type: The module type ("fork" or "fix")
             
-        # Get version info from cache (no force refresh)
-        version_info = self.get_version_info(device_id, force_refresh=False)
+        Returns:
+            list: List of device IDs needing update
+        """
+        config = load_config()
+        devices_to_update = []
         
-        if not version_info:
-            print(f"No version information available for {device_id}")
-            continue
-            
-        installed_module = version_info.get("module_version", "N/A").strip()
+        print(f"Checking {len(config.get('devices', []))} devices in config for module updates")
         
-        # Determine module type and version
-        if installed_module == "N/A":
-            print(f"No Play Integrity module found on {device_id}, will install module")
-            devices_to_update.append(device_id)
-            continue
-            
-        module_is_fork = "Fork" in installed_module
+        # Get a set of device IPs from the config for faster lookup
+        config_device_ips = {dev["ip"] for dev in config.get("devices", [])}
         
-        # Check if module type needs to be switched
-        if (module_type == "fix" and module_is_fork) or (module_type == "fork" and not module_is_fork):
-            print(f"Device {device_id} has different module type than preferred, updating to {module_type.upper()}")
-            devices_to_update.append(device_id)
-            continue
-        
-        # Extract current version
-        if module_is_fork:
-            version_match = re.search(r'Fork\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
-        else:
-            version_match = re.search(r'Fix\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
+        for device in config.get("devices", []):
+            device_id = device["ip"]
             
-        if version_match:
-            current_version = version_match.group(1)
-            print(f"Current module version on {device_id}: {current_version}, available: {latest_version}")
+            # Skip devices that are not in the config (this is a safety check)
+            if device_id not in config_device_ips:
+                print(f"Device {device_id} not found in config, skipping update check")
+                continue
             
-            # Compare version numbers
-            try:
-                current_tuple = parse_version(current_version)
-                new_tuple = parse_version(latest_version)
+            # Check ADB connection only once per device
+            connected, error = check_adb_connection(device_id)
+            if not connected:
+                print(f"Device {device_id} not reachable via ADB, skipping update check: {error}")
+                continue
                 
-                if current_tuple < new_tuple:
-                    print(f"Update needed for {device_id}! Installed: {current_version}, Available: {latest_version}")
-                    devices_to_update.append(device_id)
-                else:
-                    print(f"Device {device_id} already has latest version, skipping update")
-            except (ValueError, AttributeError):
-                print(f"Invalid version format for comparison on {device_id}")
-        else:
-            print(f"Could not parse version from {installed_module} on {device_id}, scheduling update")
-            devices_to_update.append(device_id)
-    
-    print(f"Found {len(devices_to_update)} devices that need {module_type.upper()} module update")
-    
-    # Final verification that all devices to update are in the config
-    devices_to_update = [dev for dev in devices_to_update if dev in config_device_ips]
-    
-    return devices_to_update
+            # Get version info from cache (no force refresh)
+            version_info = self.get_version_info(device_id, force_refresh=False)
+            
+            if not version_info:
+                print(f"No version information available for {device_id}")
+                continue
+                
+            installed_module = version_info.get("module_version", "N/A").strip()
+            
+            # Determine module type and version
+            if installed_module == "N/A":
+                print(f"No Play Integrity module found on {device_id}, will install module")
+                devices_to_update.append(device_id)
+                continue
+                
+            module_is_fork = "Fork" in installed_module
+            
+            # Check if module type needs to be switched
+            if (module_type == "fix" and module_is_fork) or (module_type == "fork" and not module_is_fork):
+                print(f"Device {device_id} has different module type than preferred, updating to {module_type.upper()}")
+                devices_to_update.append(device_id)
+                continue
+            
+            # Extract current version
+            if module_is_fork:
+                version_match = re.search(r'Fork\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
+            else:
+                version_match = re.search(r'Fix\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
+                
+            if version_match:
+                current_version = version_match.group(1)
+                print(f"Current module version on {device_id}: {current_version}, available: {latest_version}")
+                
+                # Compare version numbers
+                try:
+                    current_tuple = parse_version(current_version)
+                    new_tuple = parse_version(latest_version)
+                    
+                    if current_tuple < new_tuple:
+                        print(f"Update needed for {device_id}! Installed: {current_version}, Available: {latest_version}")
+                        devices_to_update.append(device_id)
+                    else:
+                        print(f"Device {device_id} already has latest version, skipping update")
+                except (ValueError, AttributeError):
+                    print(f"Invalid version format for comparison on {device_id}")
+            else:
+                print(f"Could not parse version from {installed_module} on {device_id}, scheduling update")
+                devices_to_update.append(device_id)
+                
+        print(f"Found {len(devices_to_update)} devices that need {module_type.upper()} module update")
+        
+        # Final verification that all devices to update are in the config
+        devices_to_update = [dev for dev in devices_to_update if dev in config_device_ips]
+        
+        return devices_to_update
 
 # Global instance
 version_manager = VersionManager()
@@ -2335,8 +2335,58 @@ async def optimized_module_update_task():
                 await asyncio.sleep(3 * 3600)
                 continue
 
-            # Find devices needing update - OPTIMIZED: Uses VersionManager
-            devices_to_update = version_manager.get_devices_needing_module_update(new_version, preferred_module)
+            # Manual implementation to find devices needing update
+            devices_to_update = []
+            config_device_ips = {dev["ip"] for dev in config.get("devices", [])}
+            
+            for device in config.get("devices", []):
+                device_id = device["ip"]
+                
+                connected, error = check_adb_connection(device_id)
+                if not connected:
+                    print(f"Device {device_id} not reachable via ADB, skipping update check: {error}")
+                    continue
+                    
+                version_info = version_manager.get_version_info(device_id, force_refresh=False)
+                
+                if not version_info:
+                    print(f"No version information available for {device_id}")
+                    continue
+                    
+                installed_module = version_info.get("module_version", "N/A").strip()
+                
+                # Determine if update needed
+                if installed_module == "N/A":
+                    print(f"No Play Integrity module found on {device_id}, will install module")
+                    devices_to_update.append(device_id)
+                    continue
+                    
+                module_is_fork = "Fork" in installed_module
+                
+                if (preferred_module == "fix" and module_is_fork) or (preferred_module == "fork" and not module_is_fork):
+                    print(f"Device {device_id} has different module type, switching to {preferred_module.upper()}")
+                    devices_to_update.append(device_id)
+                    continue
+                
+                # Extract and compare versions
+                if module_is_fork:
+                    version_match = re.search(r'Fork\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
+                else:
+                    version_match = re.search(r'Fix\s+v?(\d+(?:\.\d+)?.*|v?\d+)', installed_module)
+                    
+                if version_match:
+                    current_version = version_match.group(1)
+                    try:
+                        current_tuple = parse_version(current_version)
+                        new_tuple = parse_version(new_version)
+                        
+                        if current_tuple < new_tuple:
+                            print(f"Update needed for {device_id}: {current_version} -> {new_version}")
+                            devices_to_update.append(device_id)
+                    except (ValueError, AttributeError):
+                        devices_to_update.append(device_id)
+                else:
+                    devices_to_update.append(device_id)
 
             update_count = len(devices_to_update)
             if update_count > 0:
@@ -2749,13 +2799,17 @@ async def optimized_device_monitoring():
                     restart_reason = "API reports device as offline"
                 
                 elif mem_free > 0 and mem_free < threshold * 1024:
-                    # Only restart if memory is critically low (below 50 MB or 25% of threshold, whichever is lower)
-                    critical_minimum = min(50 * 1024, threshold * 1024 * 0.25)
+                    # Restart if memory is below the configured threshold
+                    restart_needed = True
+                    restart_reason = f"Low memory: {mem_mb:.2f} MB (Threshold: {threshold} MB)"
+    
+                    # Check notification cooldown for memory restart
+                    last_memory_notification = status.get("last_memory_notification", 0)
+                    if current_time - last_memory_notification > notification_cooldown:
+                        await notify_memory_restart(display_name, device_id, mem_free, threshold)
+                        status["last_memory_notification"] = current_time
+                        device_status_cache[device_id] = status
                     
-                    if mem_free < critical_minimum:
-                        restart_needed = True
-                        restart_reason = f"Critical low memory: {mem_mb:.2f} MB (Threshold: {threshold} MB, Critical: {critical_minimum/1024:.2f} MB)"
-                        
                         # Check notification cooldown for memory restart
                         last_memory_notification = status.get("last_memory_notification", 0)
                         if current_time - last_memory_notification > notification_cooldown:
