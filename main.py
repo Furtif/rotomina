@@ -1292,7 +1292,7 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
             
             # Calculate swipe coordinates
             start_x = int(width * 0.5)
-            start_y = int(height * 0.75)
+            start_y = int(height * 0.70)
             end_x = int(width * 0.5)
             end_y = int(height * 0.05)
             
