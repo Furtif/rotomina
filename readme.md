@@ -100,21 +100,6 @@ pip install -r requirements.txt
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-### Manual Installation
-
-If you prefer a manual installation:
-
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/rotomina.git
-cd rotomina
-
-# Install requirements
-pip install -r requirements.txt
-
-# Start the server
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
 
 ## Configuration
 
@@ -123,7 +108,7 @@ On first run, a default `config.json` will be created. Default login credentials
 - Username: `admin`
 - Password: `admin`
 
-**Important**: Change these credentials after first login!
+⚠️ **SECURITY WARNING**: These are default credentials and must be changed immediately after first login! Using default credentials poses a significant security risk.
 
 ### Device Management
 

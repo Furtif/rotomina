@@ -105,7 +105,7 @@ class ADBConnectionPool:
                     ["adb", "devices"],
                     capture_output=True,
                     text=True,
-                    timeout=5
+                    timeout=TimeoutConfig.SHORT
                 )
                 
                 device_line_pattern = f"{device_id}\tdevice"
@@ -121,7 +121,7 @@ class ADBConnectionPool:
             if is_network_device:
                 connect_result = subprocess.run(
                     ["adb", "connect", device_id],
-                    timeout=10,
+                    timeout=TimeoutConfig.MEDIUM,
                     capture_output=True,
                     text=True
                 )
@@ -137,7 +137,7 @@ class ADBConnectionPool:
                 ["adb", "devices"],
                 capture_output=True,
                 text=True,
-                timeout=5
+                timeout=TimeoutConfig.SHORT
             )
             
             device_line_pattern = f"{device_id}\tdevice"
@@ -160,7 +160,7 @@ class ADBConnectionPool:
                 command.insert(1, "-s")
                 command.insert(2, device_id)
                 
-            result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(command, capture_output=True, text=True, timeout=TimeoutConfig.LONG)
             
             with self.connection_lock:
                 self.last_command_time[device_id] = time.time()
@@ -189,7 +189,7 @@ class ADBConnectionPool:
         
         # Execute as a single shell command
         cmd = ["adb", "-s", device_id, "shell", script]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=TimeoutConfig.LONG)
         
         with self.connection_lock:
             self.last_command_time[device_id] = time.time()
@@ -294,7 +294,7 @@ class VersionManager:
             # Try PoGo version
             try:
                 pogo_cmd = f'adb -s {device_id} shell "dumpsys package com.nianticlabs.pokemongo | grep versionName"'
-                pogo_result = subprocess.run(pogo_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                pogo_result = subprocess.run(pogo_cmd, shell=True, capture_output=True, text=True, timeout=TimeoutConfig.MEDIUM)
                 if pogo_result.returncode == 0 and pogo_result.stdout:
                     pogo_match = re.search(r'versionName=(\d+\.\d+\.\d+)', pogo_result.stdout)
                     if pogo_match:
@@ -307,7 +307,7 @@ class VersionManager:
             # Try MITM version
             try:
                 mitm_cmd = f'adb -s {device_id} shell "dumpsys package com.github.furtif.furtifformaps | grep versionName"'
-                mitm_result = subprocess.run(mitm_cmd, shell=True, capture_output=True, text=True, timeout=10)
+                mitm_result = subprocess.run(mitm_cmd, shell=True, capture_output=True, text=True, timeout=TimeoutConfig.MEDIUM)
                 if mitm_result.returncode == 0 and mitm_result.stdout:
                     mitm_match = re.search(r'versionName=(\d+\.\d+(?:\.\d+)?)', mitm_result.stdout)
                     if mitm_match:
@@ -602,6 +602,14 @@ DISCORD_COLOR_GREEN = 0x2ECC71   # Success/Online
 DISCORD_COLOR_BLUE = 0x3498DB    # Info/Update
 DISCORD_COLOR_ORANGE = 0xE67E22  # Warning/Restart
 
+# Centralized timeout configuration
+class TimeoutConfig:
+    SHORT = 5      # Quick operations (disconnect, simple checks)  
+    MEDIUM = 10    # Standard operations (connect, version checks)
+    LONG = 30      # Complex operations (installations, downloads)
+    HTTP = 15      # HTTP requests
+    ADB_KEYGEN = 10 # ADB key generation
+
 # Helper functions for specific notifications
 async def notify_device_offline(device_name: str, ip: str):
     """Notifies when a device goes offline"""
@@ -679,8 +687,7 @@ def clear_device_update_status(device_id: str) -> None:
 @ttl_cache(ttl=3600)
 def check_adb_connection(device_id: str) -> tuple[bool, str]:
     """
-    Checks ADB connection to device and returns status and error message.
-    Optimized to use connection pool.
+    Checks ADB connection to device with enhanced reliability and retry logic.
     
     Args:
         device_id: Either serial number (USB) or IP:Port (network)
@@ -688,40 +695,61 @@ def check_adb_connection(device_id: str) -> tuple[bool, str]:
     Returns:
         tuple: (is_connected, error_message)
     """
-    try:
-        device_id = format_device_id(device_id)
-        
-        # Use connection pool for checking
-        if adb_pool.ensure_connected(device_id):
-            return True, ""
-        
-        # If not connected, try once more with explicit connect
-        is_network_device = ":" in device_id and all(c.isdigit() or c == '.' or c == ':' for c in device_id)
-        
-        if is_network_device:
-            connect_result = adb_pool.execute_command(
-                device_id,
-                ["adb", "connect", device_id]
-            )
+    device_id = format_device_id(device_id)
+    is_network_device = ":" in device_id and all(c.isdigit() or c == '.' or c == ':' for c in device_id)
+    
+    # Retry connection attempts with backoff
+    for attempt in range(3):
+        try:
+            # Initial connection check
+            if adb_pool.ensure_connected(device_id):
+                return True, ""
             
-            if "failed to authenticate" in connect_result.stdout:
-                return False, "Authentication error: Please restart ADB on device"
+            # For network devices, try explicit reconnection
+            if is_network_device:
+                try:
+                    # Disconnect first to reset connection state
+                    adb_pool.execute_command(device_id, ["adb", "disconnect", device_id], timeout=5)
+                    time.sleep(0.5)  # Brief pause for cleanup
+                    
+                    # Reconnect
+                    connect_result = adb_pool.execute_command(
+                        device_id, ["adb", "connect", device_id], timeout=10
+                    )
+                    
+                    # Check for specific error patterns
+                    stdout = connect_result.stdout.lower()
+                    if "failed to authenticate" in stdout:
+                        return False, "Authentication error: Device not authorized"
+                    elif "already connected" in stdout or "connected to" in stdout:
+                        # Verify the connection worked
+                        if adb_pool.ensure_connected(device_id):
+                            return True, ""
+                    elif any(err in stdout for err in ["cannot", "failed", "refused", "unreachable"]):
+                        if attempt == 2:  # Last attempt
+                            return False, f"Connection failed: {connect_result.stdout.strip()}"
+                        continue  # Retry
+                        
+                except subprocess.TimeoutExpired:
+                    if attempt == 2:
+                        return False, "Connection timeout"
+                    continue
             
-            if "cannot" in connect_result.stdout.lower() or "failed" in connect_result.stdout.lower():
-                error_msg = connect_result.stdout.strip()
-                return False, f"Connection error: {error_msg}"
-        
-        # Final check
-        if adb_pool.ensure_connected(device_id):
-            return True, ""
-            
-        return False, "Device not connected or not found"
-        
-    except subprocess.TimeoutExpired:
-        return False, "Connection timeout"
-    except Exception as e:
-        print(f"Critical error checking {device_id}: {str(e)}")
-        return False, f"Critical ADB error: {str(e)}"
+            # Final verification
+            if adb_pool.ensure_connected(device_id):
+                return True, ""
+                
+            # Wait before retry (exponential backoff)
+            if attempt < 2:
+                time.sleep(1 * (2 ** attempt))
+                
+        except Exception as e:
+            if attempt == 2:  # Last attempt
+                return False, f"Critical ADB error: {str(e)}"
+            time.sleep(1)
+            continue
+    
+    return False, "Device connection failed after 3 attempts"
 
 def format_device_id(device_id: str) -> str:
     """
@@ -833,7 +861,7 @@ def ensure_adb_keys() -> str:
         if not private_key_exists:
             print(f"Private ADB key not found at {adb_private_key}, generating new keys...")
             try:
-                subprocess.run(["adb", "keygen", adb_private_key], check=True, timeout=10)
+                subprocess.run(["adb", "keygen", adb_private_key], check=True, timeout=TimeoutConfig.ADB_KEYGEN)
                 private_key_exists = os.path.exists(adb_private_key) and os.path.getsize(adb_private_key) > 0
                 print(f"Generated private key with adb keygen: {private_key_exists}")
             except (subprocess.SubprocessError, FileNotFoundError) as e:
@@ -1175,14 +1203,51 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
                         await asyncio.sleep(wait_time)
                         continue
                     
-                    # Parse the file locally
+                    # Parse the file locally with enhanced error handling
                     try:
+                        # Check if file is empty or too small
+                        if dump_file.stat().st_size < 100:
+                            print(f"UI dump file too small ({dump_file.stat().st_size} bytes) on attempt {attempt+1}")
+                            await asyncio.sleep(wait_time)
+                            continue
+                            
+                        # Read and validate XML content
+                        with open(dump_file, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        # Basic validation - must contain expected XML structure
+                        if not content.strip().startswith('<?xml') or 'hierarchy' not in content:
+                            print(f"Invalid XML structure in UI dump on attempt {attempt+1}")
+                            await asyncio.sleep(wait_time)
+                            continue
+                        
                         tree = ET.parse(dump_file)
                         root = tree.getroot()
-                    except ET.ParseError as e:
-                        print(f"Error parsing UI dump XML on attempt {attempt+1}: {str(e)}")
-                        await asyncio.sleep(wait_time)
-                        continue
+                        
+                        # Verify we have a valid hierarchy
+                        if root.tag != 'hierarchy' or len(root) == 0:
+                            print(f"Empty or invalid UI hierarchy on attempt {attempt+1}")
+                            await asyncio.sleep(wait_time)
+                            continue
+                            
+                    except (ET.ParseError, UnicodeDecodeError, OSError) as e:
+                        print(f"XML parsing error on attempt {attempt+1}: {str(e)}")
+                        # On last attempt, try regenerating UI dump with different parameters
+                        if attempt == max_attempts - 1:
+                            print("Trying alternative UI dump method on final attempt")
+                            alt_dump_cmd = 'uiautomator dump --compressed /sdcard/dump.xml'
+                            adb_pool.execute_command(device_id, ["adb", "shell", alt_dump_cmd])
+                            await asyncio.sleep(1)
+                            try:
+                                adb_pool.execute_command(device_id, ["adb", "pull", "/sdcard/dump.xml", str(dump_file)])
+                                tree = ET.parse(dump_file)
+                                root = tree.getroot()
+                            except:
+                                await asyncio.sleep(wait_time)
+                                continue
+                        else:
+                            await asyncio.sleep(wait_time)
+                            continue
                     
                     # Debug output
                     if attempt == 0:
@@ -1294,7 +1359,7 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
             start_x = int(width * 0.5)
             start_y = int(height * 0.70)
             end_x = int(width * 0.5)
-            end_y = int(height * 0.05)
+            end_y = 1
             
             # Execute swipe
             swipe_cmd = f'input swipe {start_x} {start_y} {end_x} {end_y} 500'
@@ -1694,100 +1759,57 @@ async def optimized_perform_installation(device_ip: str, extract_dir: Path) -> b
         # Extract version from directory
         version = extract_dir.name
         
-        # STAGE 1: Try normal installation
-        print(f"STAGE 1: Attempting normal installation on {device_ip}")
-        installation_success, error_msg = await optimized_apk_installation(device_ip, apk_files)
+        # Try installation with progressive recovery strategies
+        strategies = [
+            ("normal", None, 60),
+            ("cache_clear", clear_app_cache, 50),  
+            ("uninstall_reinstall", uninstall_pogo, 55)
+        ]
         
-        # If successful, proceed with app startup
-        if installation_success:
-            print(f"Stage 1 installation successful on {device_ip}")
-            update_progress(60)
-        # If storage issue detected, proceed to Stage 2
-        elif error_msg == "INSUFFICIENT_STORAGE":
-            # STAGE 2: Clear cache and retry
-            print(f"STAGE 2: Clearing cache and retrying installation on {device_ip}")
-            update_progress(30)
+        for strategy_name, recovery_action, progress_target in strategies:
+            print(f"Attempting {strategy_name} installation on {device_ip}")
             
-            # Send notification about cache clearing attempt
-            await send_discord_notification(
-                message=f"⚠️ Insufficient storage detected on **{device_name}** ({device_ip}). Attempting to clear cache and retry installation.",
-                title="Installation Retry - Clearing Cache",
-                color=DISCORD_COLOR_ORANGE
-            )
-            
-            # Clear app cache
-            cache_cleared = await clear_app_cache(device_ip)
-            update_progress(40)
-            
-            if cache_cleared:
-                # Retry installation after cache clearing
-                installation_success, error_msg = await optimized_apk_installation(device_ip, apk_files)
-                update_progress(50)
-                
-                # If still unsuccessful and storage issue persists, go to Stage 3
-                if not installation_success and error_msg == "INSUFFICIENT_STORAGE":
-                    # STAGE 3: Uninstall and reinstall
-                    print(f"STAGE 3: Uninstalling and reinstalling on {device_ip}")
-                    update_progress(40)
-                    
-                    # Send notification about uninstall attempt
+            # Execute recovery action if needed
+            if recovery_action:
+                if strategy_name == "cache_clear":
                     await send_discord_notification(
-                        message=f"⚠️ Cache clearing insufficient on **{device_name}** ({device_ip}). Attempting to uninstall and reinstall Pokemon GO.",
-                        title="Installation Retry - Uninstalling",
+                        message=f"⚠️ Insufficient storage on **{device_name}** ({device_ip}). Clearing cache and retrying.",
+                        title="Installation Retry - Clearing Cache",
                         color=DISCORD_COLOR_ORANGE
                     )
-                    
-                    # Uninstall the app
-                    uninstall_success = await uninstall_pogo(device_ip)
-                    update_progress(45)
-                    
-                    if uninstall_success:
-                        # Final installation attempt after uninstall
-                        installation_success, error_msg = await optimized_apk_installation(device_ip, apk_files)
-                        update_progress(55)
-                        
-                        if not installation_success:
-                            print(f"Final installation attempt failed on {device_ip}: {error_msg}")
-                            await send_discord_notification(
-                                message=f"❌ All installation attempts failed on **{device_name}** ({device_ip}). Final error: {error_msg}",
-                                title="Installation Failed",
-                                color=DISCORD_COLOR_RED
-                            )
-                            clear_device_update_status(device_ip)
-                            return False
-                    else:
-                        print(f"Failed to uninstall Pokemon GO on {device_ip}")
-                        await send_discord_notification(
-                            message=f"❌ Failed to uninstall Pokemon GO on **{device_name}** ({device_ip}). Cannot continue with installation.",
-                            title="Uninstallation Failed",
-                            color=DISCORD_COLOR_RED
-                        )
-                        clear_device_update_status(device_ip)
-                        return False
-                elif not installation_success:
-                    # Different error after cache clearing
-                    print(f"Installation failed after cache clearing on {device_ip}: {error_msg}")
+                    update_progress(30)
+                    recovery_success = await recovery_action(device_ip)
+                    update_progress(40)
+                elif strategy_name == "uninstall_reinstall":
                     await send_discord_notification(
-                        message=f"❌ Installation failed after cache clearing on **{device_name}** ({device_ip}). Error: {error_msg}",
-                        title="Installation Failed",
-                        color=DISCORD_COLOR_RED
+                        message=f"⚠️ Cache clearing insufficient on **{device_name}** ({device_ip}). Uninstalling and reinstalling Pokemon GO.",
+                        title="Installation Retry - Uninstalling", 
+                        color=DISCORD_COLOR_ORANGE
                     )
-                    clear_device_update_status(device_ip)
-                    return False
-            else:
-                print(f"Failed to clear cache on {device_ip}")
-                await send_discord_notification(
-                    message=f"❌ Failed to clear cache on **{device_name}** ({device_ip}). Cannot continue with installation.",
-                    title="Cache Clearing Failed",
-                    color=DISCORD_COLOR_RED
-                )
-                clear_device_update_status(device_ip)
-                return False
-        else:
-            # Handle non-storage errors
-            print(f"Installation failed on {device_ip}: {error_msg}")
+                    update_progress(40)
+                    recovery_success = await recovery_action(device_ip)
+                    update_progress(45)
+                
+                if not recovery_success:
+                    print(f"Recovery action {strategy_name} failed on {device_ip}")
+                    continue
+            
+            # Try installation
+            installation_success, error_msg = await optimized_apk_installation(device_ip, apk_files)
+            update_progress(progress_target)
+            
+            if installation_success:
+                print(f"{strategy_name.title()} installation successful on {device_ip}")
+                break
+            elif error_msg != "INSUFFICIENT_STORAGE":
+                # Non-storage error, don't continue with other strategies
+                print(f"Installation failed with non-storage error on {device_ip}: {error_msg}")
+                break
+        
+        # Handle final failure
+        if not installation_success:
             await send_discord_notification(
-                message=f"❌ Pokemon GO installation failed on **{device_name}** ({device_ip}). Error: {error_msg}",
+                message=f"❌ All installation attempts failed on **{device_name}** ({device_ip}). Final error: {error_msg}",
                 title="Installation Failed",
                 color=DISCORD_COLOR_RED
             )
@@ -2105,78 +2127,146 @@ def save_module_preference(module_type):
     save_config(config)
     return config
 
+# GitHub API cache for module versions
+github_api_cache = {}
+GITHUB_CACHE_TTL = 3600  # 1 hour cache
+
+def clear_github_api_cache():
+    """Clears the GitHub API cache to force fresh data on next request"""
+    global github_api_cache
+    github_api_cache.clear()
+    print("GitHub API cache cleared")
+
 async def fetch_available_module_versions(module_type="fork"):
-    """Fetches available module versions from GitHub API"""
-    try:
-        if module_type == "fix":
-            api_url = PIFIX_GITHUB_API
-            module_dir = PIFIX_MODULE_DIR
-        else:
-            api_url = PIF_GITHUB_API
-            module_dir = PIF_MODULE_DIR
-        
-        module_dir.mkdir(parents=True, exist_ok=True)
-        
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            print(f"Fetching {module_type.upper()} releases from GitHub API...")
+    """Fetches available module versions from GitHub API with caching to reduce rate limiting"""
+    # Check cache first
+    cache_key = f"module_versions_{module_type}"
+    current_time = time.time()
+    
+    if cache_key in github_api_cache:
+        cached_data, timestamp = github_api_cache[cache_key]
+        if current_time - timestamp < GITHUB_CACHE_TTL:
+            print(f"Using cached {module_type.upper()} versions (cached {int((current_time - timestamp)/60)} minutes ago)")
+            return cached_data
+    if module_type == "fix":
+        api_url = PIFIX_GITHUB_API
+        module_dir = PIFIX_MODULE_DIR
+    else:
+        api_url = PIF_GITHUB_API
+        module_dir = PIF_MODULE_DIR
+    
+    module_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Retry configuration
+    max_retries = 3
+    timeout_values = [10, 15, 20]  # Progressive timeout
+    
+    for attempt in range(max_retries):
+        try:
+            timeout = timeout_values[attempt]
+            print(f"Fetching {module_type.upper()} releases from GitHub API (attempt {attempt + 1}/{max_retries})...")
             
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                "Accept": "application/vnd.github.v3+json"
-            }
-            
-            response = await client.get(api_url, headers=headers, timeout=15)
-            if response.status_code != 200:
-                print(f"GitHub API Error: {response.status_code}")
-                return []
-            
-            try:
-                releases = response.json()
-                if not releases or not isinstance(releases, list):
-                    print("Invalid or empty releases data")
-                    return []
-                    
-                versions = []
-                for release in releases:
-                    tag_name = release.get("tag_name", "").strip()
-                    if not tag_name:
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=httpx.Timeout(timeout),
+                limits=httpx.Limits(max_connections=5)
+            ) as client:
+                
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "application/vnd.github.v3+json",
+                    "X-GitHub-Api-Version": "2022-11-28"
+                }
+                
+                response = await client.get(api_url, headers=headers)
+                
+                # Handle different HTTP status codes
+                if response.status_code == 200:
+                    try:
+                        releases = response.json()
+                        if not releases or not isinstance(releases, list):
+                            print(f"Empty or invalid releases data on attempt {attempt + 1}")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                                continue
+                            return []
+                        
+                        versions = []
+                        for release in releases:
+                            if not isinstance(release, dict):
+                                continue
+                                
+                            tag_name = release.get("tag_name", "").strip()
+                            if not tag_name:
+                                continue
+                                
+                            version = tag_name.lstrip("v")
+                            published_at = release.get("published_at", "")
+                            
+                            # Find zip asset with validation
+                            assets = release.get("assets", [])
+                            if not isinstance(assets, list):
+                                continue
+                                
+                            zip_asset = next(
+                                (asset for asset in assets
+                                 if isinstance(asset, dict) and 
+                                 asset.get("name", "").endswith(".zip") and
+                                 asset.get("browser_download_url")),
+                                None
+                            )
+                            
+                            if zip_asset:
+                                versions.append({
+                                    "version": version,
+                                    "tag_name": tag_name,
+                                    "published_at": published_at,
+                                    "download_url": zip_asset.get("browser_download_url"),
+                                    "filename": zip_asset.get("name"),
+                                    "module_type": module_type
+                                })
+                        
+                        if versions:
+                            versions.sort(key=lambda x: parse_version(x["version"]), reverse=True)
+                            print(f"Successfully fetched {len(versions)} {module_type.upper()} versions")
+                            # Cache the successful result
+                            github_api_cache[cache_key] = (versions, current_time)
+                            return versions
+                        else:
+                            print(f"No valid releases found on attempt {attempt + 1}")
+                            
+                    except (json.JSONDecodeError, KeyError, TypeError) as e:
+                        print(f"Invalid API response format on attempt {attempt + 1}: {str(e)}")
+                        
+                elif response.status_code == 403:
+                    print(f"GitHub API rate limit exceeded (attempt {attempt + 1})")
+                    if attempt < max_retries - 1:
+                        print("Waiting 5 minutes before retry to respect rate limit (60 requests per hour)...")
+                        await asyncio.sleep(300)  # Wait 5 minutes for rate limit reset
                         continue
                         
-                    version = tag_name.lstrip("v")
-                    published_at = release.get("published_at", "")
+                elif response.status_code == 404:
+                    print(f"GitHub repository not found: {api_url}")
+                    return []  # Don't retry for 404
                     
-                    zip_asset = next(
-                        (
-                            asset for asset in release.get("assets", [])
-                            if asset["name"].endswith(".zip")
-                        ),
-                        None
-                    )
-                    
-                    if zip_asset:
-                        download_url = zip_asset.get("browser_download_url")
-                        filename = zip_asset.get("name")
-                        versions.append({
-                            "version": version,
-                            "tag_name": tag_name,
-                            "published_at": published_at,
-                            "download_url": download_url,
-                            "filename": filename,
-                            "module_type": module_type
-                        })
+                else:
+                    print(f"GitHub API HTTP {response.status_code} on attempt {attempt + 1}")
                 
-                versions.sort(key=lambda x: parse_version(x["version"]), reverse=True)
-                
-                print(f"Found {len(versions)} {module_type.upper()} versions")
-                return versions
-                
-            except json.JSONDecodeError:
-                print("Invalid GitHub API response")
-                return []
-                
-    except Exception as e:
-        print(f"Error fetching {module_type.upper()} versions: {str(e)}")
-        return []
+        except (httpx.TimeoutException, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+            print(f"Network timeout on attempt {attempt + 1}: {str(e)}")
+        except (httpx.HTTPError, httpx.RequestError) as e:
+            print(f"Network error on attempt {attempt + 1}: {str(e)}")
+        except Exception as e:
+            print(f"Unexpected error on attempt {attempt + 1}: {str(e)}")
+        
+        # Wait before retry (except on last attempt)
+        if attempt < max_retries - 1:
+            wait_time = 2 ** attempt
+            print(f"Retrying in {wait_time} seconds...")
+            await asyncio.sleep(wait_time)
+    
+    print(f"Failed to fetch {module_type.upper()} versions after {max_retries} attempts")
+    return []
 
 async def fetch_available_pif_versions():
     """
@@ -2623,6 +2713,9 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         device_status_cache.clear()
         version_manager.mark_for_refresh(device_id)
         print(f"{module_type.upper()} update successfully completed for {device_id}")
+        
+        # Clear GitHub API cache to ensure fresh version info on next check
+        clear_github_api_cache()
 
         # Now that we've verified installation, send notification
         module_name = "PlayIntegrityFork" if module_type == "fork" else "PlayIntegrityFix"
@@ -2809,13 +2902,6 @@ async def optimized_device_monitoring():
                         await notify_memory_restart(display_name, device_id, mem_free, threshold)
                         status["last_memory_notification"] = current_time
                         device_status_cache[device_id] = status
-                    
-                        # Check notification cooldown for memory restart
-                        last_memory_notification = status.get("last_memory_notification", 0)
-                        if current_time - last_memory_notification > notification_cooldown:
-                            await notify_memory_restart(display_name, device_id, mem_free, threshold)
-                            status["last_memory_notification"] = current_time
-                            device_status_cache[device_id] = status
                     else:
                         # Memory is below threshold but not critically low
                         print(f"  - Memory is below threshold but not critically low")
