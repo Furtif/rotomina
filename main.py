@@ -1299,6 +1299,10 @@ async def optimized_login_sequence(device_id: str, max_retries: int = 3) -> bool
             # Execute swipe
             swipe_cmd = f'input swipe {start_x} {start_y} {end_x} {end_y} 500'
             adb_pool.execute_command(device_id, ["adb", "shell", swipe_cmd])
+            
+            # Execute swipe again
+            swipe_cmd = f'input swipe {start_x} {start_y} {end_x} {end_y} 500'
+            adb_pool.execute_command(device_id, ["adb", "shell", swipe_cmd])
             return True
             
         # Function to check if apps are running
