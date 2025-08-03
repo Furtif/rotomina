@@ -12,10 +12,14 @@ import traceback
 import tempfile
 import os
 import platform
+import logging
+import hashlib
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from functools import wraps
 from typing import List, Dict, Optional, Tuple, Set
+from dataclasses import dataclass
+from apkutils2 import APK
 
 from fastapi import FastAPI, Request, Form, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -1948,166 +1952,928 @@ async def optimized_pogo_update_task():
             
         await asyncio.sleep(3 * 3600)
 
-# MapWorld Auto-Update Functions
-MAPWORLD_DOWNLOAD_URL = "https://protomines.ddns.net/apk/MapWorld-release.zip"
-MAPWORLD_APK_PATH = BASE_DIR / "data" / "apks" / "mapworld.apk"
-LAST_VERSION_FILE = BASE_DIR / "data" / "mapworld_last_version"
+@dataclass
+class MapWorldConfig:
+    download_url: str = "https://protomines.ddns.net/apk/MapWorld-release.zip"
+    apk_dir: Path = BASE_DIR / "data" / "apks"
+    apk_base_name: str = "mapworld"
+    package_name: str = "com.nianticlabs.pokemongo"  # Adjust to actual MapWorld package
+    cache_file: Path = BASE_DIR / "data" / "mapworld_metadata_cache"
+    check_interval_hours: int = 1
+    download_timeout: int = 300
+    metadata_timeout: int = 10
+    max_retries: int = 3
+    cache_ttl_minutes: int = 30
+    keep_previous_versions: int = 1  # Anzahl vorheriger Versionen aufbewahren
 
-def get_remote_metadata() -> Dict:
-    """Gets metadata for the remote file"""
-    try:
-        response = httpx.head(MAPWORLD_DOWNLOAD_URL, timeout=10)
-        if response.status_code == 200:
-            return {
-                "last_modified": response.headers.get("last-modified", ""),
-                "content_length": response.headers.get("content-length", "")
+# Logger Setup
+logger = logging.getLogger(__name__)
+
+class MapWorldUpdater:
+    """Optimierte Klasse für MapWorld Updates mit Versionsverwaltung und besserer Fehlerbehandlung"""
+    
+    def __init__(self, config: MapWorldConfig = None):
+        self.config = config or MapWorldConfig()
+        self._metadata_cache = {}
+        self._cache_timestamp = 0
+        
+        # Ensure APK directory exists
+        self.config.apk_dir.mkdir(parents=True, exist_ok=True)
+    
+    def extract_apk_version(self, apk_path: Path) -> Tuple[str, str]:
+        """Extrahiert Versionsname und -code aus APK mit apkutils2"""
+        try:
+            with open(apk_path, 'rb') as file:
+                apk = APK(file)
+                manifest = apk.get_manifest()
+                version_name = manifest.get('@android:versionName', 'unknown')
+                version_code = manifest.get('@android:versionCode', '0')
+                return version_name, version_code
+        except Exception as e:
+            logger.error(f"Error extracting APK version from {apk_path}: {e}")
+            return "unknown", "0"
+    
+    def get_versioned_filename(self, version_name: str, version_code: str) -> str:
+        """Generiert versionierten Dateinamen"""
+        # Säubere den Versionsnamen für Dateinamen
+        clean_version = "".join(c for c in version_name if c.isalnum() or c in ".-_")
+        return f"{self.config.apk_base_name}_v{clean_version}_{version_code}.apk"
+    
+    def get_current_apk_path(self) -> Optional[Path]:
+        """Findet die aktuellste APK-Datei"""
+        apk_files = list(self.config.apk_dir.glob(f"{self.config.apk_base_name}_v*.apk"))
+        if not apk_files:
+            return None
+        
+        # Sortiere nach Änderungsdatum (neueste zuerst)
+        apk_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
+        return apk_files[0]
+    
+    def get_all_apk_versions(self) -> list[Tuple[Path, str, str]]:
+        """Gibt alle verfügbaren APK-Versionen zurück, sortiert nach Datum"""
+        apk_files = list(self.config.apk_dir.glob(f"{self.config.apk_base_name}_v*.apk"))
+        versions = []
+        
+        for apk_path in apk_files:
+            try:
+                version_name, version_code = self.extract_apk_version(apk_path)
+                versions.append((apk_path, version_name, version_code))
+            except Exception as e:
+                logger.warning(f"Could not read version from {apk_path}: {e}")
+        
+        # Sortiere nach Änderungsdatum (neueste zuerst)
+        versions.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
+        return versions
+    
+    def cleanup_old_versions(self):
+        """Entfernt alte APK-Versionen, behält nur die neuesten"""
+        versions = self.get_all_apk_versions()
+        
+        if len(versions) <= self.config.keep_previous_versions + 1:
+            return  # Nichts zu bereinigen
+        
+        # Behalte die neuesten (keep_previous_versions + 1) Versionen
+        to_keep = versions[:self.config.keep_previous_versions + 1]
+        to_remove = versions[self.config.keep_previous_versions + 1:]
+        
+        for apk_path, version_name, version_code in to_remove:
+            try:
+                apk_path.unlink()
+                logger.info(f"Removed old version: {apk_path.name} (v{version_name})")
+            except Exception as e:
+                logger.error(f"Error removing old APK {apk_path}: {e}")
+    
+    def backup_current_version(self) -> Optional[Path]:
+        """Erstellt Backup der aktuellen Version bevor neue heruntergeladen wird"""
+        current_apk = self.get_current_apk_path()
+        if not current_apk or not current_apk.exists():
+            return None
+        
+        try:
+            # Erstelle Backup mit _backup Suffix
+            backup_name = current_apk.stem + "_backup" + current_apk.suffix
+            backup_path = current_apk.parent / backup_name
+            
+            shutil.copy2(current_apk, backup_path)
+            logger.info(f"Created backup: {backup_path.name}")
+            return backup_path
+        except Exception as e:
+            logger.error(f"Error creating backup: {e}")
+            return None
+    
+    async def get_remote_metadata(self) -> Dict:
+        """Cached metadata retrieval mit exponential backoff"""
+        now = datetime.datetime.now().timestamp()
+        cache_valid_until = self._cache_timestamp + (self.config.cache_ttl_minutes * 60)
+        
+        # Return cached data if still valid
+        if self._metadata_cache and now < cache_valid_until:
+            logger.debug("Using cached metadata")
+            return self._metadata_cache
+        
+        for attempt in range(self.config.max_retries):
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.head(
+                        self.config.download_url, 
+                        timeout=self.config.metadata_timeout
+                    )
+                    
+                    if response.status_code == 200:
+                        metadata = {
+                            "last_modified": response.headers.get("last-modified", ""),
+                            "content_length": response.headers.get("content-length", ""),
+                            "etag": response.headers.get("etag", "")
+                        }
+                        
+                        # Cache successful result
+                        self._metadata_cache = metadata
+                        self._cache_timestamp = now
+                        logger.info("Successfully retrieved and cached metadata")
+                        return metadata
+                    else:
+                        logger.warning(f"HTTP {response.status_code} when fetching metadata")
+                        
+            except httpx.TimeoutException:
+                logger.warning(f"Timeout on attempt {attempt + 1}/{self.config.max_retries}")
+            except httpx.RequestError as e:
+                logger.error(f"Request error on attempt {attempt + 1}: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error on attempt {attempt + 1}: {e}")
+            
+            if attempt < self.config.max_retries - 1:
+                wait_time = 2 ** attempt  # Exponential backoff
+                logger.info(f"Retrying in {wait_time} seconds...")
+                await asyncio.sleep(wait_time)
+        
+        logger.error("Failed to retrieve metadata after all retries")
+        return {}
+
+    def _parse_last_modified(self, last_modified_str: str) -> Optional[float]:
+        """Robustes Parsing des Last-Modified Headers"""
+        if not last_modified_str:
+            return None
+            
+        # Verschiedene Datumsformate unterstützen
+        formats = [
+            "%a, %d %b %Y %H:%M:%S %Z",
+            "%a, %d %b %Y %H:%M:%S GMT",
+            "%a, %d-%b-%Y %H:%M:%S %Z"
+        ]
+        
+        for fmt in formats:
+            try:
+                return datetime.datetime.strptime(last_modified_str, fmt).timestamp()
+            except ValueError:
+                continue
+        
+        logger.warning(f"Could not parse last-modified header: {last_modified_str}")
+        return None
+
+    async def has_update_available(self) -> Tuple[bool, str]:
+        """Verbesserte Update-Prüfung mit detailliertem Feedback"""
+        current_apk = self.get_current_apk_path()
+        
+        if not current_apk or not current_apk.exists():
+            return True, "No local APK file exists"
+
+        try:
+            remote_meta = await self.get_remote_metadata()
+            if not remote_meta:
+                return False, "Could not retrieve remote metadata"
+
+            # ETag-based comparison (most reliable)
+            if remote_meta.get("etag"):
+                local_etag = await self._get_local_file_etag(current_apk)
+                remote_etag = remote_meta["etag"].strip('"')
+                if local_etag != remote_etag:
+                    return True, f"ETag mismatch: local={local_etag}, remote={remote_etag}"
+
+            # Fallback to timestamp and size comparison
+            remote_modified_str = remote_meta.get("last_modified")
+            if remote_modified_str:
+                remote_modified = self._parse_last_modified(remote_modified_str)
+                if remote_modified:
+                    local_modified = current_apk.stat().st_mtime
+                    if remote_modified > local_modified:
+                        return True, f"Remote file is newer: {datetime.datetime.fromtimestamp(remote_modified)}"
+
+            # Size comparison
+            content_length = remote_meta.get("content_length")
+            if content_length and content_length.isdigit():
+                remote_size = int(content_length)
+                local_size = current_apk.stat().st_size
+                if remote_size != local_size:
+                    return True, f"Size mismatch: local={local_size}, remote={remote_size}"
+
+            return False, "No updates available"
+
+        except Exception as e:
+            logger.error(f"Error checking for updates: {e}")
+            return False, f"Error during update check: {str(e)}"
+
+    async def _get_local_file_etag(self, file_path: Path) -> str:
+        """Generiert einen ETag-ähnlichen Hash für die lokale Datei"""
+        try:
+            hasher = hashlib.md5()
+            with open(file_path, 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    hasher.update(chunk)
+            return hasher.hexdigest()
+        except Exception as e:
+            logger.error(f"Error generating local file hash: {e}")
+            return ""
+
+    async def download_mapworld(self, progress_callback=None) -> Tuple[bool, Optional[Path]]:
+        """Async download mit Versionserkennung und Progress-Tracking"""
+        try:
+            # Backup current version if exists
+            backup_path = self.backup_current_version()
+            
+            # Ensure parent directory exists
+            self.config.apk_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Download to temporary file first
+            temp_path = self.config.apk_dir / f"{self.config.apk_base_name}_temp.apk"
+            
+            async with httpx.AsyncClient() as client:
+                async with client.stream(
+                    "GET", 
+                    self.config.download_url, 
+                    timeout=self.config.download_timeout
+                ) as response:
+                    response.raise_for_status()
+                    
+                    total_size = int(response.headers.get("content-length", 0))
+                    downloaded = 0
+                    
+                    with open(temp_path, "wb") as f:
+                        async for chunk in response.aiter_bytes(chunk_size=8192):
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            
+                            if progress_callback and total_size > 0:
+                                progress = (downloaded / total_size) * 100
+                                await progress_callback(progress)
+            
+            # Extract version information from downloaded APK
+            try:
+                version_name, version_code = self.extract_apk_version(temp_path)
+                logger.info(f"Downloaded APK version: {version_name} (code: {version_code})")
+                
+                # Generate versioned filename
+                versioned_filename = self.get_versioned_filename(version_name, version_code)
+                final_path = self.config.apk_dir / versioned_filename
+                
+                # Check if this version already exists
+                if final_path.exists():
+                    logger.warning(f"Version {version_name} already exists, overwriting...")
+                    final_path.unlink()
+                
+                # Move temp file to final versioned location
+                temp_path.replace(final_path)
+                
+                logger.info(f"Successfully downloaded MapWorld APK v{version_name} ({downloaded} bytes)")
+                
+                # Cleanup old versions
+                self.cleanup_old_versions()
+                
+                # Remove backup file if download was successful
+                if backup_path and backup_path.exists():
+                    backup_path.unlink()
+                    logger.info("Removed backup file after successful download")
+                
+                await self._notify_update_downloaded("MapWorld", version_name)
+                return True, final_path
+                
+            except Exception as version_error:
+                logger.error(f"Error extracting version info: {version_error}")
+                # Fallback: use timestamp-based filename
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                fallback_name = f"{self.config.apk_base_name}_{timestamp}.apk"
+                final_path = self.config.apk_dir / fallback_name
+                temp_path.replace(final_path)
+                
+                logger.info(f"Downloaded MapWorld APK with fallback name: {fallback_name}")
+                await self._notify_update_downloaded("MapWorld", "unknown version")
+                return True, final_path
+            
+        except Exception as e:
+            logger.error(f"Download failed: {e}")
+            
+            # Clean up temp file if it exists
+            if temp_path and temp_path.exists():
+                temp_path.unlink()
+            
+            # Restore backup if download failed
+            if backup_path and backup_path.exists():
+                try:
+                    current_apk = self.get_current_apk_path()
+                    if current_apk:
+                        backup_path.replace(current_apk)
+                        logger.info("Restored backup after failed download")
+                except Exception as restore_error:
+                    logger.error(f"Error restoring backup: {restore_error}")
+            
+            return False, None
+
+    async def get_installed_version(self, device_ip: str) -> Tuple[Optional[str], Optional[str]]:
+        """Ermittelt die installierte MapWorld-Version auf einem Gerät"""
+        try:
+            # Check ADB connection first
+            connected, error = await self._check_adb_connection_async(device_ip)
+            if not connected:
+                logger.warning(f"Cannot check version on {device_ip}: {error}")
+                return None, None
+            
+            # Method 1: Try to get version via dumpsys
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: adb_pool.execute_command(
+                    device_ip,
+                    ["adb", "shell", f"dumpsys package {self.config.package_name} | grep versionName"]
+                )
+            )
+            
+            if result.returncode == 0 and result.stdout:
+                # Parse version from output like "versionName=2.54"
+                for line in result.stdout.split('\n'):
+                    if 'versionName=' in line:
+                        version_name = line.split('versionName=')[1].strip()
+                        logger.debug(f"Found installed version on {device_ip}: {version_name}")
+                        return version_name, None
+            
+            # Method 2: Try pm list with version
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: adb_pool.execute_command(
+                    device_ip,
+                    ["adb", "shell", f"pm dump {self.config.package_name} | grep versionName"]
+                )
+            )
+            
+            if result.returncode == 0 and result.stdout:
+                for line in result.stdout.split('\n'):
+                    if 'versionName=' in line:
+                        version_name = line.split('versionName=')[1].strip()
+                        logger.debug(f"Found installed version via pm dump on {device_ip}: {version_name}")
+                        return version_name, None
+            
+            # Method 3: Check if package exists at all
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: adb_pool.execute_command(
+                    device_ip,
+                    ["adb", "shell", f"pm list packages | grep {self.config.package_name}"]
+                )
+            )
+            
+            if result.returncode == 0 and result.stdout and self.config.package_name in result.stdout:
+                logger.debug(f"Package found on {device_ip}, but version extraction failed")
+                return "unknown", None
+            
+            logger.info(f"MapWorld (package: {self.config.package_name}) not installed on {device_ip}")
+            return None, None
+            
+        except Exception as e:
+            logger.error(f"Error checking installed version on {device_ip}: {e}")
+            return None, None
+    
+    def compare_versions(self, version1: str, version2: str) -> int:
+        """Vergleicht zwei Versionsnummern. Gibt -1, 0, oder 1 zurück"""
+        try:
+            def normalize_version(v):
+                # Split version into parts and convert to integers
+                parts = []
+                for part in v.split('.'):
+                    # Extract numeric part (ignore non-numeric suffixes)
+                    numeric_part = ''.join(c for c in part if c.isdigit())
+                    parts.append(int(numeric_part) if numeric_part else 0)
+                return parts
+            
+            v1_parts = normalize_version(version1)
+            v2_parts = normalize_version(version2)
+            
+            # Pad shorter version with zeros
+            max_len = max(len(v1_parts), len(v2_parts))
+            v1_parts.extend([0] * (max_len - len(v1_parts)))
+            v2_parts.extend([0] * (max_len - len(v2_parts)))
+            
+            for i in range(max_len):
+                if v1_parts[i] < v2_parts[i]:
+                    return -1
+                elif v1_parts[i] > v2_parts[i]:
+                    return 1
+            
+            return 0
+            
+        except Exception as e:
+            logger.error(f"Error comparing versions {version1} vs {version2}: {e}")
+            return 0  # Treat as equal if comparison fails
+
+    async def should_update_device(self, device_ip: str, new_version: str) -> Tuple[bool, str]:
+        """Prüft ob ein Update auf dem Gerät nötig ist"""
+        try:
+            installed_version, _ = await self.get_installed_version(device_ip)
+            
+            if installed_version is None:
+                return True, "MapWorld not installed"
+            
+            if installed_version == "unknown":
+                return True, "Cannot determine installed version"
+            
+            comparison = self.compare_versions(installed_version, new_version)
+            
+            if comparison < 0:
+                return True, f"Update available: {installed_version} → {new_version}"
+            elif comparison == 0:
+                return False, f"Same version already installed: {installed_version}"
+            else:
+                return False, f"Newer version already installed: {installed_version} > {new_version}"
+                
+        except Exception as e:
+            logger.error(f"Error checking if update needed for {device_ip}: {e}")
+            return True, f"Error checking version, will attempt update: {str(e)}"
+
+    async def install_mapworld(self, device_ip: str, force_install: bool = False) -> bool:
+        """Optimierte Installation mit Versionsprüfung und besserer Fehlerbehandlung"""
+        try:
+            # Get the latest APK
+            current_apk = self.get_current_apk_path()
+            if not current_apk or not current_apk.exists():
+                logger.error("No APK file found for installation")
+                return False
+            
+            # Extract version info for comparison
+            version_name, version_code = self.extract_apk_version(current_apk)
+            
+            # Check if update is needed (unless forced)
+            if not force_install:
+                should_update, reason = await self.should_update_device(device_ip, version_name)
+                if not should_update:
+                    logger.info(f"Skipping installation on {device_ip}: {reason}")
+                    return True  # Return True as it's not an error
+                logger.info(f"Installing on {device_ip}: {reason}")
+            
+            device_details = get_device_details(device_ip)
+            device_name = device_details.get("display_name", device_ip.split(":")[0])
+            
+            # Check ADB connection first
+            connected, error = await self._check_adb_connection_async(device_ip)
+            if not connected:
+                logger.warning(f"Skipping installation on {device_ip}: {error}")
+                return False
+            
+            # Execute installation command using synchronous method
+            result = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: adb_pool.execute_command(
+                    device_ip,
+                    ["adb", "install", "-r", str(current_apk)]
+                )
+            )
+            
+            if result.returncode == 0:
+                logger.info(f"Successfully installed MapWorld v{version_name} on {device_ip}")
+                await self._notify_update_installed(device_name, device_ip, "MapWorld", version_name)
+                return True
+            else:
+                logger.error(f"Installation failed on {device_ip}: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Installation error on {device_ip}: {e}")
+            return False
+        """Optimierte Installation mit Versionserkennung und besserer Fehlerbehandlung"""
+        try:
+            # Get the latest APK
+            current_apk = self.get_current_apk_path()
+            if not current_apk or not current_apk.exists():
+                logger.error("No APK file found for installation")
+                return False
+            
+            # Extract version info for logging
+            version_name, version_code = self.extract_apk_version(current_apk)
+            
+            device_details = get_device_details(device_ip)
+            device_name = device_details.get("display_name", device_ip.split(":")[0])
+            
+            # Check ADB connection first
+            connected, error = await self._check_adb_connection_async(device_ip)
+            if not connected:
+                logger.warning(f"Skipping installation on {device_ip}: {error}")
+                return False
+            
+            # Execute installation command
+            result = await adb_pool.execute_command_async(
+                device_ip,
+                ["adb", "install", "-r", str(current_apk)]
+            )
+            
+            if result.returncode == 0:
+                logger.info(f"Successfully installed MapWorld v{version_name} on {device_ip}")
+                await self._notify_update_installed(device_name, device_ip, "MapWorld", version_name)
+                return True
+            else:
+                logger.error(f"Installation failed on {device_ip}: {result.stderr}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Installation error on {device_ip}: {e}")
+            return False
+
+    def get_version_info(self) -> Dict:
+        """Gibt Informationen über verfügbare Versionen zurück"""
+        versions = self.get_all_apk_versions()
+        current_apk = self.get_current_apk_path()
+        
+        info = {
+            "total_versions": len(versions),
+            "versions": [],
+            "current_version": None
+        }
+        
+        for apk_path, version_name, version_code in versions:
+            version_info = {
+                "path": str(apk_path),
+                "filename": apk_path.name,
+                "version_name": version_name,
+                "version_code": version_code,
+                "size_mb": round(apk_path.stat().st_size / (1024 * 1024), 2),
+                "modified": datetime.datetime.fromtimestamp(apk_path.stat().st_mtime).isoformat(),
+                "is_current": apk_path == current_apk
             }
-        return {}
-    except Exception as e:
-        print(f"Metadata check error: {str(e)}")
-        return {}
-
-def has_update_available() -> bool:
-    """Checks for new version via Last-Modified header and file size"""
-    if not MAPWORLD_APK_PATH.exists():
-        return True
-
-    remote_meta = get_remote_metadata()
-    if not remote_meta or "last_modified" not in remote_meta:
-        print("Failed to get valid metadata from server")
-        return False
-
-    try:
-        # Make sure the last-modified header exists and is in the expected format
-        if not remote_meta["last_modified"]:
-            print("Missing or empty last-modified header")
-            return False
+            info["versions"].append(version_info)
             
-        remote_modified = datetime.datetime.strptime(
-            remote_meta["last_modified"], 
-            "%a, %d %b %Y %H:%M:%S %Z"
-        ).timestamp()
-
-        local_modified = MAPWORLD_APK_PATH.stat().st_mtime
+            if apk_path == current_apk:
+                info["current_version"] = version_info
         
-        # Make sure content-length exists and is valid
-        if not remote_meta.get("content_length") or not remote_meta["content_length"].isdigit():
-            print("Missing or invalid content-length header")
-            return False
-            
-        remote_size = int(remote_meta["content_length"])
-        local_size = MAPWORLD_APK_PATH.stat().st_size
+        return info
 
-        return (remote_modified > local_modified) or (remote_size != local_size)
-    except (ValueError, KeyError, AttributeError) as e:
-        print(f"Error checking for MapWorld update: {str(e)}")
-        return False
-
-def download_mapworld():
-    """Downloads the latest version"""
-    try:
-        MAPWORLD_APK_PATH.parent.mkdir(parents=True, exist_ok=True)
-        
-        with httpx.stream("GET", MAPWORLD_DOWNLOAD_URL, timeout=30) as response:
-            response.raise_for_status()
-            with open(MAPWORLD_APK_PATH, "wb") as f:
-                for chunk in response.iter_bytes():
-                    f.write(chunk)
-        print("MapWorld APK successfully updated")
-        asyncio.create_task(notify_update_downloaded("MapWorld", "new version"))
-    except Exception as e:
-        print(f"Download failed: {str(e)}")
-        raise
-
-def install_mapworld(device_ip: str):
-    """Installs the APK on a device"""
-    try:
-        device_details = get_device_details(device_ip)
-        device_name = device_details.get("display_name", device_ip.split(":")[0])
-        
-        # Use the optimized command execution
-        result = adb_pool.execute_command(
-            device_ip,
-            ["adb", "install", "-r", str(MAPWORLD_APK_PATH)]
+    async def _check_adb_connection_async(self, device_ip: str) -> Tuple[bool, str]:
+        """Async wrapper für ADB connection check"""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, check_adb_connection, device_ip
         )
-        
-        if result.returncode == 0:
-            print(f"Successfully installed MapWorld on {device_ip}")
-            asyncio.create_task(notify_update_installed(device_name, device_ip, "MapWorld", "new version"))
-        else:
-            print(f"MapWorld installation error {device_ip}: {result.stderr}")
-            
-    except Exception as e:
-        print(f"Installation error {device_ip}: {str(e)}")
 
+    async def _notify_update_downloaded(self, app_name: str, version: str):
+        """Async notification wrapper"""
+        await notify_update_downloaded(app_name, version)
+
+    async def _notify_update_installed(self, device_name: str, device_ip: str, app_name: str, version: str):
+        """Async notification wrapper"""
+        await notify_update_installed(device_name, device_ip, app_name, version)
+
+# Optimierte Update Task
 async def mapworld_update_task():
-    """Automatic update check every 1 hours"""
-    # Wait a bit to let the application start up first
-    await asyncio.sleep(30)
+    """Robuste Auto-Update Task mit Versionsverwaltung und besserer Fehlerbehandlung"""
+    updater = MapWorldUpdater()
+    startup_delay = 30
+    
+    logger.info(f"MapWorld update task starting in {startup_delay} seconds...")
+    await asyncio.sleep(startup_delay)
+    
+    # Log initial version info
+    version_info = updater.get_version_info()
+    if version_info["current_version"]:
+        current = version_info["current_version"]
+        logger.info(f"Current MapWorld version: {current['version_name']} ({current['filename']})")
+    else:
+        logger.info("No MapWorld APK found")
     
     while True:
         try:
-            try:
-                update_available = has_update_available()
-            except Exception as e:
-                print(f"Error checking MapWorld update: {str(e)}")
-                update_available = False
-                
+            update_available, reason = await updater.has_update_available()
+            logger.info(f"Update check result: {reason}")
+            
             if update_available:
-                print("New MapWorld version available")
-                download_mapworld()
+                logger.info("New MapWorld version available, starting download...")
+                
+                # Download with progress logging
+                async def log_progress(progress):
+                    if progress % 10 == 0:  # Log every 10%
+                        logger.info(f"Download progress: {progress:.1f}%")
+                
+                download_success, apk_path = await updater.download_mapworld(log_progress)
+                if not download_success:
+                    logger.error("Download failed, skipping installation")
+                    continue
+                
+                # Log new version info
+                if apk_path:
+                    version_name, version_code = updater.extract_apk_version(apk_path)
+                    logger.info(f"Successfully downloaded MapWorld v{version_name} (code: {version_code})")
                 
                 # Install on all connected devices
                 config = load_config()
-                successful_installs = 0
-                for device in config.get("devices", []):
-                    device_ip = device["ip"]
-                    try:
-                        # Check ADB connection first
-                        connected, error = check_adb_connection(device_ip)
-                        if not connected:
-                            print(f"Skipping MapWorld installation on {device_ip}: {error}")
-                            continue
-                            
-                        print(f"Installing MapWorld update on device {device_ip}")
-                        install_mapworld(device_ip)
-                        successful_installs += 1
-                    except Exception as e:
-                        print(f"Error installing MapWorld on {device_ip}: {str(e)}")
+                devices = config.get("devices", [])
                 
-                print(f"MapWorld installation completed on {successful_installs} devices")
+                if not devices:
+                    logger.warning("No devices configured for installation")
+                    continue
+                
+                # Parallel installation with limited concurrency and better reporting
+                semaphore = asyncio.Semaphore(3)  # Max 3 concurrent installations
+                
+                async def install_on_device_with_info(device):
+                    async with semaphore:
+                        device_ip = device["ip"]
+                        device_name = device.get("name", device_ip.split(":")[0])
+                        
+                        try:
+                            # Check current installed version first
+                            installed_version, _ = await updater.get_installed_version(device_ip)
+                            logger.info(f"Device {device_name} ({device_ip}): "
+                                      f"installed={installed_version or 'Not installed'}")
+                            
+                            result = await updater.install_mapworld(device_ip)
+                            
+                            if result:
+                                final_version, _ = await updater.get_installed_version(device_ip)
+                                logger.info(f"Device {device_name}: Installation successful, "
+                                          f"now running v{final_version or 'unknown'}")
+                            else:
+                                logger.warning(f"Device {device_name}: Installation failed")
+                            
+                            return result
+                            
+                        except Exception as e:
+                            logger.error(f"Device {device_name}: Installation error: {e}")
+                            return False
+                
+                # Execute installations
+                tasks = [install_on_device_with_info(device) for device in devices]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Count results
+                successful_installs = 0
+                skipped_installs = 0
+                failed_installs = 0
+                
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        failed_installs += 1
+                        logger.error(f"Device {devices[i]['ip']}: Exception during installation: {result}")
+                    elif result is True:
+                        successful_installs += 1
+                    elif result is False:
+                        failed_installs += 1
+                    else:
+                        skipped_installs += 1
+                
+                total_devices = len(devices)
+                logger.info(f"Installation summary: {successful_installs} successful, "
+                          f"{skipped_installs} skipped, {failed_installs} failed "
+                          f"out of {total_devices} devices")
+                
+                # Log final version status
+                final_version_info = updater.get_version_info()
+                logger.info(f"Available versions: {final_version_info['total_versions']}")
         
         except Exception as e:
-            print(f"Auto-update error: {str(e)}")
+            logger.error(f"Auto-update error: {e}")
+            import traceback
+            traceback.print_exc()
         
-        await asyncio.sleep(3600)
+        # Wait for next check
+        check_interval = updater.config.check_interval_hours * 3600
+        logger.debug(f"Next update check in {updater.config.check_interval_hours} hours")
+        await asyncio.sleep(check_interval)
 
+# Optimierte Scheduled Task
 async def scheduled_update_task():
     """
-    Runs scheduled update checks at specific times of day.
-    Currently configured to run at 3:00 AM to check for updates.
+    Verbesserte zeitgesteuerte Update-Prüfung mit flexibler Konfiguration
     """
+    # Konfigurierbare Update-Zeiten
+    update_hours = [3, 15]  # 3:00 AM und 3:00 PM
+    last_run_dates = set()
+    
     while True:
         try:
             now = datetime.datetime.now()
+            today = now.date()
+            current_hour = now.hour
             
-            # Run at 3:00 AM
-            if now.hour == 3 and now.minute == 0:
-                print("Running scheduled update check...")
+            # Prüfen ob es Zeit für einen Update-Check ist
+            should_run = (
+                current_hour in update_hours and 
+                now.minute < 5 and  # Innerhalb der ersten 5 Minuten der Stunde
+                (today, current_hour) not in last_run_dates
+            )
+            
+            if should_run:
+                logger.info(f"Running scheduled update check at {now}")
                 
-                # Check for PoGO updates
+                # MapWorld Updates
+                updater = MapWorldUpdater()
+                update_available, reason = await updater.has_update_available()
+                
+                if update_available:
+                    logger.info(f"Scheduled update triggered: {reason}")
+                    download_success, apk_path = await updater.download_mapworld()
+                    
+                    if download_success and apk_path:
+                        version_name, version_code = updater.extract_apk_version(apk_path)
+                        logger.info(f"Scheduled download completed: MapWorld v{version_name}")
+                    else:
+                        logger.error("Scheduled download failed")
+                
+                # PoGO Updates (existing function)
                 ensure_latest_apk_downloaded()
                 
-                # Wait a minute before checking again to avoid multiple executions
-                await asyncio.sleep(60)
+                # Mark this hour as completed for today
+                last_run_dates.add((today, current_hour))
+                
+                # Clean up old entries (keep only last 7 days)
+                cutoff_date = today - datetime.timedelta(days=7)
+                last_run_dates = {
+                    (date, hour) for date, hour in last_run_dates 
+                    if date >= cutoff_date
+                }
+                
+                logger.info("Scheduled update check completed")
             
-            # Check every 30 seconds for the right time
-            await asyncio.sleep(30)
+            # Check every minute
+            await asyncio.sleep(60)
             
         except Exception as e:
-            print(f"Error in scheduled update task: {str(e)}")
+            logger.error(f"Error in scheduled update task: {e}")
+            import traceback
             traceback.print_exc()
-            await asyncio.sleep(300)  # On error, wait 5 minutes before retrying
+            await asyncio.sleep(300)  # Wait 5 minutes on error
+
+# Hilfsfunktionen für Versionsverwaltung
+def get_mapworld_version_info() -> Dict:
+    """Öffentliche Funktion zum Abrufen von Versionsinformationen"""
+    updater = MapWorldUpdater()
+    return updater.get_version_info()
+
+async def install_specific_version(device_ip: str, version_name: str = None) -> bool:
+    """Installiert eine spezifische Version auf einem Gerät"""
+    updater = MapWorldUpdater()
+    
+    if version_name:
+        # Suche nach spezifischer Version
+        versions = updater.get_all_apk_versions()
+        target_apk = None
+        
+        for apk_path, v_name, v_code in versions:
+            if v_name == version_name:
+                target_apk = apk_path
+                break
+        
+        if not target_apk:
+            logger.error(f"Version {version_name} not found")
+            return False
+        
+        # Temporär die APK als "current" setzen für Installation
+        current_apk = updater.get_current_apk_path()
+        if current_apk != target_apk:
+            # Backup current
+            backup_name = f"{current_apk.stem}_temp_backup{current_apk.suffix}"
+            backup_path = current_apk.parent / backup_name
+            if current_apk and current_apk.exists():
+                shutil.copy2(current_apk, backup_path)
+            
+            # Copy target to current position
+            temp_current = current_apk.parent / f"temp_current_{target_apk.name}"
+            shutil.copy2(target_apk, temp_current)
+            
+            try:
+                result = await updater.install_mapworld(device_ip)
+                
+                # Restore original current
+                if backup_path.exists():
+                    backup_path.replace(current_apk)
+                    backup_path.unlink(missing_ok=True)
+                
+                temp_current.unlink(missing_ok=True)
+                return result
+                
+            except Exception as e:
+                # Cleanup on error
+                temp_current.unlink(missing_ok=True)
+                if backup_path.exists():
+                    backup_path.replace(current_apk)
+                raise e
+    
+    # Install current version
+    return await updater.install_mapworld(device_ip)
+
+async def check_all_device_versions() -> Dict:
+    """Überprüft MapWorld-Versionen auf allen konfigurierten Geräten"""
+    updater = MapWorldUpdater()
+    config = load_config()
+    devices = config.get("devices", [])
+    
+    if not devices:
+        return {"error": "No devices configured"}
+    
+    results = {}
+    
+    async def check_device_version(device):
+        device_ip = device["ip"]
+        device_name = device.get("name", device_ip.split(":")[0])
+        
+        try:
+            installed_version, _ = await updater.get_installed_version(device_ip)
+            connected, connection_error = await updater._check_adb_connection_async(device_ip)
+            
+            return {
+                "device_name": device_name,
+                "device_ip": device_ip,
+                "installed_version": installed_version,
+                "connected": connected,
+                "connection_error": connection_error if not connected else None,
+                "status": "installed" if installed_version else "not_installed"
+            }
+        except Exception as e:
+            return {
+                "device_name": device_name,
+                "device_ip": device_ip,
+                "installed_version": None,
+                "connected": False,
+                "connection_error": str(e),
+                "status": "error"
+            }
+    
+    # Check all devices in parallel
+    tasks = [check_device_version(device) for device in devices]
+    device_results = await asyncio.gather(*tasks)
+    
+    # Get current downloadable version
+    current_apk = updater.get_current_apk_path()
+    available_version = None
+    if current_apk and current_apk.exists():
+        available_version, _ = updater.extract_apk_version(current_apk)
+    
+    # Organize results
+    for device_result in device_results:
+        device_ip = device_result["device_ip"]
+        results[device_ip] = device_result
+        
+        # Add update status
+        if available_version and device_result["installed_version"]:
+            if device_result["installed_version"] != "unknown":
+                comparison = updater.compare_versions(
+                    device_result["installed_version"], 
+                    available_version
+                )
+                if comparison < 0:
+                    device_result["update_available"] = True
+                    device_result["update_info"] = f"{device_result['installed_version']} → {available_version}"
+                elif comparison == 0:
+                    device_result["update_available"] = False
+                    device_result["update_info"] = "Up to date"
+                else:
+                    device_result["update_available"] = False
+                    device_result["update_info"] = f"Newer version installed: {device_result['installed_version']}"
+            else:
+                device_result["update_available"] = True
+                device_result["update_info"] = "Version unknown, update recommended"
+        elif available_version:
+            device_result["update_available"] = True
+            device_result["update_info"] = f"Not installed, can install v{available_version}"
+        else:
+            device_result["update_available"] = False
+            device_result["update_info"] = "No APK available for installation"
+    
+    # Add summary
+    total_devices = len(device_results)
+    connected_devices = sum(1 for r in device_results if r["connected"])
+    installed_devices = sum(1 for r in device_results if r["status"] == "installed")
+    update_needed = sum(1 for r in device_results if r.get("update_available", False))
+    
+    summary = {
+        "total_devices": total_devices,
+        "connected_devices": connected_devices,
+        "installed_devices": installed_devices,
+        "updates_needed": update_needed,
+        "available_version": available_version,
+        "devices": results
+    }
+    
+    return summary
+    """Manuelle Bereinigung alter Versionen"""
+    updater = MapWorldUpdater()
+    
+    if keep_versions is not None:
+        original_keep = updater.config.keep_previous_versions
+        updater.config.keep_previous_versions = keep_versions
+        
+    try:
+        versions_before = len(updater.get_all_apk_versions())
+        updater.cleanup_old_versions()
+        versions_after = len(updater.get_all_apk_versions())
+        
+        removed_count = versions_before - versions_after
+        logger.info(f"Cleanup completed: removed {removed_count} old versions")
+        return removed_count
+        
+    finally:
+        if keep_versions is not None:
+            updater.config.keep_previous_versions = original_keep
 
 # PIF Version Management Functions
 PIF_MODULE_DIR = BASE_DIR / "data" / "modules" / "playintegrityfork"
@@ -2511,6 +3277,13 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
     """Installs PlayIntegrityFork or PlayIntegrityFix module with progress updates for the UI"""
     global update_in_progress, current_progress
     
+    def cleanup_installation():
+        """Helper function to clean up installation state"""
+        global update_in_progress, current_progress
+        update_in_progress = False
+        current_progress = 0
+        clear_device_update_status(device_ip)
+    
     try:
         # Mark device as in update
         mark_device_in_update(device_ip, f"pif-{module_type}")
@@ -2525,25 +3298,19 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         device_in_config = any(dev["ip"] == device_id for dev in config.get("devices", []))
         if not device_in_config:
             print(f"Device {device_id} not found in config, aborting module installation")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            cleanup_installation()
             return False
         
         update_progress(10)
         
         if not adb_pool.ensure_connected(device_id):
             print(f"Cannot connect to {device_id} for module installation")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            cleanup_installation()
             return False
         
         if module_path is None or not Path(module_path).exists():
             print(f"Module file not found at {module_path}")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            cleanup_installation()
             return False
         
         version = "unknown"
@@ -2557,7 +3324,8 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
 
         update_progress(15)
         
-        # Remove existing modules
+        # Remove existing modules (no reboot needed)
+        print(f"Removing existing modules on {device_id}")
         adb_pool.execute_command(
             device_id,
             ["adb", "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfix'"]
@@ -2567,33 +3335,7 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
             ["adb", "shell", "su -c 'rm -rf /data/adb/modules/playintegrityfork'"]
         )
         
-        update_progress(20)
-        print(f"First reboot for {device_id}")
-        
-        adb_pool.execute_command(device_id, ["adb", "reboot"])
-        
-        print(f"Device {device_id} rebooting. Waiting for it to come back online...")
-        device_back_online = False
-        for i in range(30):  # Increased timeout to 5 minutes
-            await asyncio.sleep(10)
-            update_progress(20 + (i * 1))
-            try:
-                if adb_pool.ensure_connected(device_id):
-                    print(f"Device {device_id} is back online after first reboot")
-                    device_back_online = True
-                    break
-            except Exception as e:
-                print(f"Error checking device connectivity: {str(e)}")
-                continue
-        
-        if not device_back_online:
-            print(f"Device {device_id} did not come back online after reboot, aborting installation")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
-            return False
-        
-        update_progress(50)
+        update_progress(25)
         print(f"Pushing {module_type.upper()} module to {device_id}")
         
         push_result = adb_pool.execute_command(
@@ -2603,12 +3345,10 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         
         if push_result.returncode != 0:
             print(f"Failed to push module to device: {push_result.stderr}")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            cleanup_installation()
             return False
         
-        update_progress(60)
+        update_progress(40)
         print(f"Installing {module_type.upper()} module on {device_id}")
         
         # First check if Magisk is installed and available
@@ -2619,9 +3359,7 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         
         if magisk_check.returncode != 0 or "not found" in magisk_check.stderr:
             print(f"Magisk not available on device {device_id}: {magisk_check.stderr}")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            cleanup_installation()
             return False
         
         # Now install the module
@@ -2632,12 +3370,10 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         
         if install_result.returncode != 0:
             print(f"Module installation failed: {install_result.stderr}")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            cleanup_installation()
             return False
         
-        update_progress(70)
+        update_progress(60)
         
         # Verify module was installed
         module_dir = "/data/adb/modules/playintegrityfork" if module_type == "fork" else "/data/adb/modules/playintegrityfix"
@@ -2648,9 +3384,7 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         
         if verify_result.returncode != 0 or "No such file" in verify_result.stderr:
             print(f"Module directory not found after installation: {verify_result.stderr}")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            cleanup_installation()
             return False
         
         # Clean up
@@ -2659,20 +3393,20 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
             ["adb", "shell", "rm /data/local/tmp/pif.zip"]
         )
         
-        update_progress(80)
-        print(f"Final reboot for {device_id} to apply {module_type.upper()} module")
+        update_progress(70)
+        print(f"Rebooting {device_id} to apply {module_type.upper()} module")
         
         adb_pool.execute_command(device_id, ["adb", "reboot"])
 
-        # Wait for device to come back online after final reboot
-        print(f"Waiting for device {device_id} to come back online after final reboot...")
+        # Wait for device to come back online after reboot
+        print(f"Waiting for device {device_id} to come back online after reboot...")
         device_back_online = False
-        for i in range(30):  # Increased timeout to 5 minutes
+        for i in range(30):  # 5 minutes timeout
             await asyncio.sleep(10)
-            update_progress(80 + (i * 0.5))
+            update_progress(70 + (i * 0.8))  # Progress from 70 to 94
             try:
                 if adb_pool.ensure_connected(device_id):
-                    print(f"Device {device_id} is back online after final reboot")
+                    print(f"Device {device_id} is back online after reboot")
                     device_back_online = True
                     break
             except Exception as e:
@@ -2680,14 +3414,14 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
                 continue
                 
         if not device_back_online:
-            print(f"Device {device_id} did not come back online after final reboot. Installation status uncertain.")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            print(f"Device {device_id} did not come back online after reboot. Installation status uncertain.")
+            cleanup_installation()
             return False
             
         # Verify module is actually enabled
         await asyncio.sleep(10)  # Give a moment for the system to stabilize
+        
+        update_progress(95)
         
         # Final verification
         final_verify = adb_pool.execute_command(
@@ -2697,9 +3431,7 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         
         if final_verify.returncode != 0 or "No such file" in final_verify.stderr:
             print(f"Module appears to be not properly installed after reboot: {final_verify.stderr}")
-            update_in_progress = False
-            current_progress = 0
-            clear_device_update_status(device_ip)
+            cleanup_installation()
             return False
             
         module_enabled = adb_pool.execute_command(
@@ -2726,6 +3458,8 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
         
         update_progress(100)
         await asyncio.sleep(2)
+        
+        # Successful completion cleanup
         update_in_progress = False
         current_progress = 0
         
@@ -2734,8 +3468,7 @@ async def install_module_with_progress(device_ip: str, module_path=None, module_
     except Exception as e:
         print(f"Module Installation error for {device_ip}: {str(e)}")
         traceback.print_exc()
-        update_in_progress = False
-        current_progress = 0
+        cleanup_installation()
         return False
     
     finally:
