@@ -19,7 +19,6 @@ from pathlib import Path
 from functools import wraps
 from typing import List, Dict, Optional, Tuple, Set
 from dataclasses import dataclass
-from apkutils2 import APK
 
 from fastapi import FastAPI, Request, Form, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -1957,20 +1956,20 @@ class MapWorldConfig:
     download_url: str = "https://protomines.ddns.net/apk/MapWorld-release.zip"
     apk_dir: Path = BASE_DIR / "data" / "apks"
     apk_base_name: str = "mapworld"
-    package_name: str = "com.nianticlabs.pokemongo"  # Adjust to actual MapWorld package
+    package_name: str = "com.github.furtif.furtifformaps"  # Adjust to actual MapWorld package
     cache_file: Path = BASE_DIR / "data" / "mapworld_metadata_cache"
     check_interval_hours: int = 1
     download_timeout: int = 300
     metadata_timeout: int = 10
     max_retries: int = 3
     cache_ttl_minutes: int = 30
-    keep_previous_versions: int = 1  # Anzahl vorheriger Versionen aufbewahren
+    keep_previous_versions: int = 1  # Number of previous versions to keep
 
-# Logger Setup
+# Logger setup
 logger = logging.getLogger(__name__)
 
 class MapWorldUpdater:
-    """Optimierte Klasse für MapWorld Updates mit Versionsverwaltung und besserer Fehlerbehandlung"""
+    """Optimized class for MapWorld updates with version management and better error handling"""
     
     def __init__(self, config: MapWorldConfig = None):
         self.config = config or MapWorldConfig()
@@ -1980,37 +1979,108 @@ class MapWorldUpdater:
         # Ensure APK directory exists
         self.config.apk_dir.mkdir(parents=True, exist_ok=True)
     
-    def extract_apk_version(self, apk_path: Path) -> Tuple[str, str]:
-        """Extrahiert Versionsname und -code aus APK mit apkutils2"""
+    def extract_apk_version(self, apk_path: Path, debug: bool = False) -> Tuple[str, str]:
+        """Extracts version name and code from APK using Android Binary XML UTF-16 parsing"""
+    
         try:
-            with open(apk_path, 'rb') as file:
-                apk = APK(file)
-                manifest = apk.get_manifest()
-                version_name = manifest.get('@android:versionName', 'unknown')
-                version_code = manifest.get('@android:versionCode', '0')
-                return version_name, version_code
+            with zipfile.ZipFile(apk_path, 'r') as zip_file:
+                manifest_data = zip_file.read('AndroidManifest.xml')
+            
+                if debug:
+                    logger.info(f"DEBUG: AndroidManifest.xml size: {len(manifest_data)} bytes")
+            
+                # Check for Android Binary XML magic bytes
+                if len(manifest_data) < 4 or manifest_data[:4] != b'\x03\x00\x08\x00':
+                    raise Exception("Not a valid Android Binary XML file")
+            
+                if debug:
+                    logger.info("DEBUG: Detected Android Binary XML format")
+            
+                # UTF-16LE decoding (proven method from debugger)
+                try:
+                    decoded = manifest_data.decode('utf-16le', errors='ignore')
+                    version_matches = re.findall(r'(\d+\.\d+(?:\.\d+)?)', decoded)
+                
+                    if debug:
+                        logger.info(f"DEBUG: UTF-16LE found versions: {version_matches}")
+                
+                    # Filter for valid versions and select the best one
+                    valid_versions = [v for v in version_matches if self._is_valid_version(v)]
+                
+                    if valid_versions:
+                        # Remove duplicates and sort by version number (highest first)
+                        unique_versions = list(set(valid_versions))
+                        unique_versions.sort(key=lambda x: [int(p) for p in x.split('.')], reverse=True)
+                    
+                        best_version = unique_versions[0]
+                        if debug:
+                            logger.info(f"DEBUG: Selected version {best_version} from UTF-16LE decoding")
+                    
+                        return best_version, "0"
+                
+                except Exception as e:
+                    if debug:
+                        logger.debug(f"DEBUG: UTF-16LE decoding failed: {e}")
+                    raise Exception("UTF-16LE decoding failed")
+        
+            # If we get here, the method failed
+            raise Exception("No valid version found in AndroidManifest.xml")
+        
         except Exception as e:
-            logger.error(f"Error extracting APK version from {apk_path}: {e}")
+            logger.error(f"Version extraction failed for {apk_path}: {e}")
             return "unknown", "0"
+
+    def _is_valid_version(self, version: str) -> bool:
+        """Checks if a version number makes sense - extended validation"""
+        try:
+            # Basic validation
+            if not version or len(version.split('.')) > 4:
+                return False
+            
+            # Check if it has numeric parts
+            parts = version.split('.')
+            for part in parts:
+                if not part.isdigit():
+                    return False
+                if int(part) > 999:  # Unrealistic version number
+                    return False
+            
+            # Special validation for modern apps
+            if len(parts) >= 2:
+                major, minor = int(parts[0]), int(parts[1])
+                
+                # Modern MapWorld versions should be >= 2.0
+                # 1.x versions are probably wrong
+                if major == 1 and minor <= 20:
+                    logger.debug(f"Rejecting suspicious version {version} (likely too old)")
+                    return False
+                
+                # Realistic version ranges
+                if 0 <= major <= 10 and 0 <= minor <= 99:
+                    return True
+            
+            return False
+        except:
+            return False
     
     def get_versioned_filename(self, version_name: str, version_code: str) -> str:
-        """Generiert versionierten Dateinamen"""
-        # Säubere den Versionsnamen für Dateinamen
+        """Generates versioned filename"""
+        # Clean version name for filename
         clean_version = "".join(c for c in version_name if c.isalnum() or c in ".-_")
         return f"{self.config.apk_base_name}_v{clean_version}_{version_code}.apk"
     
     def get_current_apk_path(self) -> Optional[Path]:
-        """Findet die aktuellste APK-Datei"""
+        """Finds the most current APK file"""
         apk_files = list(self.config.apk_dir.glob(f"{self.config.apk_base_name}_v*.apk"))
         if not apk_files:
             return None
         
-        # Sortiere nach Änderungsdatum (neueste zuerst)
+        # Sort by modification date (newest first)
         apk_files.sort(key=lambda x: x.stat().st_mtime, reverse=True)
         return apk_files[0]
     
     def get_all_apk_versions(self) -> list[Tuple[Path, str, str]]:
-        """Gibt alle verfügbaren APK-Versionen zurück, sortiert nach Datum"""
+        """Returns all available APK versions, sorted by date"""
         apk_files = list(self.config.apk_dir.glob(f"{self.config.apk_base_name}_v*.apk"))
         versions = []
         
@@ -2021,18 +2091,18 @@ class MapWorldUpdater:
             except Exception as e:
                 logger.warning(f"Could not read version from {apk_path}: {e}")
         
-        # Sortiere nach Änderungsdatum (neueste zuerst)
+        # Sort by modification date (newest first)
         versions.sort(key=lambda x: x[0].stat().st_mtime, reverse=True)
         return versions
     
     def cleanup_old_versions(self):
-        """Entfernt alte APK-Versionen, behält nur die neuesten"""
+        """Removes old APK versions, keeps only the newest ones"""
         versions = self.get_all_apk_versions()
         
         if len(versions) <= self.config.keep_previous_versions + 1:
-            return  # Nichts zu bereinigen
+            return  # Nothing to clean up
         
-        # Behalte die neuesten (keep_previous_versions + 1) Versionen
+        # Keep the newest (keep_previous_versions + 1) versions
         to_keep = versions[:self.config.keep_previous_versions + 1]
         to_remove = versions[self.config.keep_previous_versions + 1:]
         
@@ -2044,13 +2114,13 @@ class MapWorldUpdater:
                 logger.error(f"Error removing old APK {apk_path}: {e}")
     
     def backup_current_version(self) -> Optional[Path]:
-        """Erstellt Backup der aktuellen Version bevor neue heruntergeladen wird"""
+        """Creates backup of current version before downloading new one"""
         current_apk = self.get_current_apk_path()
         if not current_apk or not current_apk.exists():
             return None
         
         try:
-            # Erstelle Backup mit _backup Suffix
+            # Create backup with _backup suffix
             backup_name = current_apk.stem + "_backup" + current_apk.suffix
             backup_path = current_apk.parent / backup_name
             
@@ -2060,9 +2130,9 @@ class MapWorldUpdater:
         except Exception as e:
             logger.error(f"Error creating backup: {e}")
             return None
-    
+
     async def get_remote_metadata(self) -> Dict:
-        """Cached metadata retrieval mit exponential backoff"""
+        """Cached metadata retrieval with exponential backoff"""
         now = datetime.datetime.now().timestamp()
         cache_valid_until = self._cache_timestamp + (self.config.cache_ttl_minutes * 60)
         
@@ -2110,11 +2180,11 @@ class MapWorldUpdater:
         return {}
 
     def _parse_last_modified(self, last_modified_str: str) -> Optional[float]:
-        """Robustes Parsing des Last-Modified Headers"""
+        """Robust parsing of Last-Modified header"""
         if not last_modified_str:
             return None
             
-        # Verschiedene Datumsformate unterstützen
+        # Support various date formats
         formats = [
             "%a, %d %b %Y %H:%M:%S %Z",
             "%a, %d %b %Y %H:%M:%S GMT",
@@ -2131,7 +2201,7 @@ class MapWorldUpdater:
         return None
 
     async def has_update_available(self) -> Tuple[bool, str]:
-        """Verbesserte Update-Prüfung mit detailliertem Feedback"""
+        """Improved update check with detailed feedback"""
         current_apk = self.get_current_apk_path()
         
         if not current_apk or not current_apk.exists():
@@ -2173,7 +2243,7 @@ class MapWorldUpdater:
             return False, f"Error during update check: {str(e)}"
 
     async def _get_local_file_etag(self, file_path: Path) -> str:
-        """Generiert einen ETag-ähnlichen Hash für die lokale Datei"""
+        """Generates ETag-like hash for local file"""
         try:
             hasher = hashlib.md5()
             with open(file_path, 'rb') as f:
@@ -2184,8 +2254,8 @@ class MapWorldUpdater:
             logger.error(f"Error generating local file hash: {e}")
             return ""
 
-    async def download_mapworld(self, progress_callback=None) -> Tuple[bool, Optional[Path]]:
-        """Async download mit Versionserkennung und Progress-Tracking"""
+    async def download_mapworld(self, progress_callback=None, force_version: str = None) -> Tuple[bool, Optional[Path]]:
+        """Async download with improved version detection"""
         try:
             # Backup current version if exists
             backup_path = self.backup_current_version()
@@ -2194,9 +2264,30 @@ class MapWorldUpdater:
             self.config.apk_dir.mkdir(parents=True, exist_ok=True)
             
             # Download to temporary file first
-            temp_path = self.config.apk_dir / f"{self.config.apk_base_name}_temp.apk"
+            temp_path = self.config.apk_dir / f"{self.config.apk_base_name}_temp_download.apk"
+            
+            # Try to extract version from URL or response headers first
+            download_version = force_version
             
             async with httpx.AsyncClient() as client:
+                # First, get headers to check for version hints
+                if not download_version:
+                    try:
+                        head_response = await client.head(self.config.download_url)
+                        content_disposition = head_response.headers.get('content-disposition', '')
+                        if 'filename=' in content_disposition:
+                            suggested_filename = content_disposition.split('filename=')[1].strip('"\'')
+                            logger.debug(f"Server suggested filename: {suggested_filename}")
+                            
+                            # Try to extract version from suggested filename
+                            version_match = re.search(r'(\d+\.\d+(?:\.\d+)?)', suggested_filename)
+                            if version_match and self._is_valid_version(version_match.group(1)):
+                                download_version = version_match.group(1)
+                                logger.info(f"Found version in server filename: {download_version}")
+                    except Exception as e:
+                        logger.debug(f"Could not get version from headers: {e}")
+                
+                # Download the file
                 async with client.stream(
                     "GET", 
                     self.config.download_url, 
@@ -2217,46 +2308,79 @@ class MapWorldUpdater:
                                 await progress_callback(progress)
             
             # Extract version information from downloaded APK
-            try:
+            if not download_version:
                 version_name, version_code = self.extract_apk_version(temp_path)
-                logger.info(f"Downloaded APK version: {version_name} (code: {version_code})")
+            else:
+                version_name = download_version
+                version_code = "0"
+                logger.info(f"Using provided version: {version_name}")
+            
+            # If we still don't have a good version, try to get it from the APK content
+            if not self._is_valid_version(version_name):
+                logger.warning(f"Invalid version '{version_name}', attempting deeper analysis...")
                 
-                # Generate versioned filename
-                versioned_filename = self.get_versioned_filename(version_name, version_code)
-                final_path = self.config.apk_dir / versioned_filename
+                # Try to extract from APK content more aggressively
+                try:
+                    extracted_version = await self._deep_version_analysis(temp_path)
+                    if extracted_version and self._is_valid_version(extracted_version):
+                        version_name = extracted_version
+                        logger.info(f"Deep analysis found version: {version_name}")
+                except Exception as e:
+                    logger.debug(f"Deep analysis failed: {e}")
+            
+            # If we still don't have a valid version, ask user or use current date
+            if not self._is_valid_version(version_name):
+                # Check if there's a pattern in the download URL
+                url_version = re.search(r'(\d+\.\d+(?:\.\d+)?)', self.config.download_url)
+                if url_version and self._is_valid_version(url_version.group(1)):
+                    version_name = url_version.group(1)
+                    logger.info(f"Found version in download URL: {version_name}")
+                else:
+                    # Use today's date as fallback (better than timestamp)
+                    today = datetime.datetime.now()
+                    version_name = f"{today.year % 100}.{today.month}.{today.day}"  # 25.8.3 format
+                    logger.warning(f"Using date-based version: {version_name}")
+            
+            logger.info(f"Final determined version: {version_name} (code: {version_code})")
+            
+            # Generate versioned filename
+            versioned_filename = self.get_versioned_filename(version_name, version_code)
+            final_path = self.config.apk_dir / versioned_filename
+            
+            # Check if this exact version already exists
+            if final_path.exists():
+                logger.warning(f"Version {version_name} already exists, checking if different...")
                 
-                # Check if this version already exists
-                if final_path.exists():
-                    logger.warning(f"Version {version_name} already exists, overwriting...")
+                # Compare file sizes to see if it's actually different
+                existing_size = final_path.stat().st_size
+                new_size = temp_path.stat().st_size
+                
+                if abs(existing_size - new_size) < 1024:  # Less than 1KB difference
+                    logger.info(f"Same version and size, keeping existing file")
+                    temp_path.unlink()
+                    if backup_path and backup_path.exists():
+                        backup_path.unlink()
+                    await self._notify_update_downloaded("MapWorld", f"{version_name} (no change)")
+                    return True, final_path
+                else:
+                    logger.info(f"Same version but different size, updating file")
                     final_path.unlink()
-                
-                # Move temp file to final versioned location
-                temp_path.replace(final_path)
-                
-                logger.info(f"Successfully downloaded MapWorld APK v{version_name} ({downloaded} bytes)")
-                
-                # Cleanup old versions
-                self.cleanup_old_versions()
-                
-                # Remove backup file if download was successful
-                if backup_path and backup_path.exists():
-                    backup_path.unlink()
-                    logger.info("Removed backup file after successful download")
-                
-                await self._notify_update_downloaded("MapWorld", version_name)
-                return True, final_path
-                
-            except Exception as version_error:
-                logger.error(f"Error extracting version info: {version_error}")
-                # Fallback: use timestamp-based filename
-                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                fallback_name = f"{self.config.apk_base_name}_{timestamp}.apk"
-                final_path = self.config.apk_dir / fallback_name
-                temp_path.replace(final_path)
-                
-                logger.info(f"Downloaded MapWorld APK with fallback name: {fallback_name}")
-                await self._notify_update_downloaded("MapWorld", "unknown version")
-                return True, final_path
+            
+            # Move temp file to final versioned location
+            temp_path.replace(final_path)
+            
+            logger.info(f"Successfully downloaded MapWorld APK v{version_name} ({downloaded} bytes)")
+            
+            # Cleanup old versions
+            self.cleanup_old_versions()
+            
+            # Remove backup file if download was successful
+            if backup_path and backup_path.exists():
+                backup_path.unlink()
+                logger.debug("Removed backup file after successful download")
+            
+            await self._notify_update_downloaded("MapWorld", version_name)
+            return True, final_path
             
         except Exception as e:
             logger.error(f"Download failed: {e}")
@@ -2276,9 +2400,46 @@ class MapWorldUpdater:
                     logger.error(f"Error restoring backup: {restore_error}")
             
             return False, None
+    
+    async def _deep_version_analysis(self, apk_path: Path) -> Optional[str]:
+        """Deeper analysis of APK for version information"""
+        try:
+            with zipfile.ZipFile(apk_path, 'r') as zip_file:
+                # Search in META-INF/MANIFEST.MF
+                try:
+                    manifest_mf = zip_file.read('META-INF/MANIFEST.MF').decode('utf-8')
+                    version_match = re.search(r'Implementation-Version:\s*([0-9]+\.[0-9]+(?:\.[0-9]+)?)', manifest_mf)
+                    if version_match:
+                        return version_match.group(1)
+                except:
+                    pass
+                
+                # Search in resources.arsc or other config files
+                for file_name in zip_file.namelist():
+                    if any(keyword in file_name.lower() for keyword in ['version', 'config', 'build']):
+                        try:
+                            if file_name.endswith(('.xml', '.txt', '.json', '.properties')):
+                                content = zip_file.read(file_name).decode('utf-8', errors='ignore')
+                                # Search for various version patterns
+                                patterns = [
+                                    r'"version":\s*"([0-9]+\.[0-9]+(?:\.[0-9]+)?)"',
+                                    r'version=([0-9]+\.[0-9]+(?:\.[0-9]+)?)',
+                                    r'app_version=([0-9]+\.[0-9]+(?:\.[0-9]+)?)',
+                                    r'<version>([0-9]+\.[0-9]+(?:\.[0-9]+)?)</version>',
+                                ]
+                                for pattern in patterns:
+                                    match = re.search(pattern, content, re.IGNORECASE)
+                                    if match and self._is_valid_version(match.group(1)):
+                                        return match.group(1)
+                        except:
+                            continue
+            
+            return None
+        except Exception:
+            return None
 
     async def get_installed_version(self, device_ip: str) -> Tuple[Optional[str], Optional[str]]:
-        """Ermittelt die installierte MapWorld-Version auf einem Gerät"""
+        """Determines the installed MapWorld version on a device"""
         try:
             # Check ADB connection first
             connected, error = await self._check_adb_connection_async(device_ip)
@@ -2340,7 +2501,7 @@ class MapWorldUpdater:
             return None, None
     
     def compare_versions(self, version1: str, version2: str) -> int:
-        """Vergleicht zwei Versionsnummern. Gibt -1, 0, oder 1 zurück"""
+        """Compares two version numbers. Returns -1, 0, or 1"""
         try:
             def normalize_version(v):
                 # Split version into parts and convert to integers
@@ -2372,7 +2533,7 @@ class MapWorldUpdater:
             return 0  # Treat as equal if comparison fails
 
     async def should_update_device(self, device_ip: str, new_version: str) -> Tuple[bool, str]:
-        """Prüft ob ein Update auf dem Gerät nötig ist"""
+        """Checks if an update is needed on the device"""
         try:
             installed_version, _ = await self.get_installed_version(device_ip)
             
@@ -2396,7 +2557,7 @@ class MapWorldUpdater:
             return True, f"Error checking version, will attempt update: {str(e)}"
 
     async def install_mapworld(self, device_ip: str, force_install: bool = False) -> bool:
-        """Optimierte Installation mit Versionsprüfung und besserer Fehlerbehandlung"""
+        """Optimized installation with version checking and better error handling"""
         try:
             # Get the latest APK
             current_apk = self.get_current_apk_path()
@@ -2444,46 +2605,9 @@ class MapWorldUpdater:
         except Exception as e:
             logger.error(f"Installation error on {device_ip}: {e}")
             return False
-        """Optimierte Installation mit Versionserkennung und besserer Fehlerbehandlung"""
-        try:
-            # Get the latest APK
-            current_apk = self.get_current_apk_path()
-            if not current_apk or not current_apk.exists():
-                logger.error("No APK file found for installation")
-                return False
-            
-            # Extract version info for logging
-            version_name, version_code = self.extract_apk_version(current_apk)
-            
-            device_details = get_device_details(device_ip)
-            device_name = device_details.get("display_name", device_ip.split(":")[0])
-            
-            # Check ADB connection first
-            connected, error = await self._check_adb_connection_async(device_ip)
-            if not connected:
-                logger.warning(f"Skipping installation on {device_ip}: {error}")
-                return False
-            
-            # Execute installation command
-            result = await adb_pool.execute_command_async(
-                device_ip,
-                ["adb", "install", "-r", str(current_apk)]
-            )
-            
-            if result.returncode == 0:
-                logger.info(f"Successfully installed MapWorld v{version_name} on {device_ip}")
-                await self._notify_update_installed(device_name, device_ip, "MapWorld", version_name)
-                return True
-            else:
-                logger.error(f"Installation failed on {device_ip}: {result.stderr}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Installation error on {device_ip}: {e}")
-            return False
 
     def get_version_info(self) -> Dict:
-        """Gibt Informationen über verfügbare Versionen zurück"""
+        """Returns information about available versions"""
         versions = self.get_all_apk_versions()
         current_apk = self.get_current_apk_path()
         
@@ -2511,7 +2635,7 @@ class MapWorldUpdater:
         return info
 
     async def _check_adb_connection_async(self, device_ip: str) -> Tuple[bool, str]:
-        """Async wrapper für ADB connection check"""
+        """Async wrapper for ADB connection check"""
         return await asyncio.get_event_loop().run_in_executor(
             None, check_adb_connection, device_ip
         )
@@ -2524,9 +2648,9 @@ class MapWorldUpdater:
         """Async notification wrapper"""
         await notify_update_installed(device_name, device_ip, app_name, version)
 
-# Optimierte Update Task
+# Optimized Update Task
 async def mapworld_update_task():
-    """Robuste Auto-Update Task mit Versionsverwaltung und besserer Fehlerbehandlung"""
+    """Robust Auto-Update Task with version management and better error handling"""
     updater = MapWorldUpdater()
     startup_delay = 30
     
@@ -2640,13 +2764,13 @@ async def mapworld_update_task():
         logger.debug(f"Next update check in {updater.config.check_interval_hours} hours")
         await asyncio.sleep(check_interval)
 
-# Optimierte Scheduled Task
+# Optimized Scheduled Task
 async def scheduled_update_task():
     """
-    Verbesserte zeitgesteuerte Update-Prüfung mit flexibler Konfiguration
+    Improved scheduled update checks with flexible configuration
     """
-    # Konfigurierbare Update-Zeiten
-    update_hours = [3, 15]  # 3:00 AM und 3:00 PM
+    # Configurable update times
+    update_hours = [3, 15]  # 3:00 AM and 3:00 PM
     last_run_dates = set()
     
     while True:
@@ -2655,10 +2779,10 @@ async def scheduled_update_task():
             today = now.date()
             current_hour = now.hour
             
-            # Prüfen ob es Zeit für einen Update-Check ist
+            # Check if it's time for an update check
             should_run = (
                 current_hour in update_hours and 
-                now.minute < 5 and  # Innerhalb der ersten 5 Minuten der Stunde
+                now.minute < 5 and  # Within first 5 minutes of the hour
                 (today, current_hour) not in last_run_dates
             )
             
@@ -2703,66 +2827,8 @@ async def scheduled_update_task():
             traceback.print_exc()
             await asyncio.sleep(300)  # Wait 5 minutes on error
 
-# Hilfsfunktionen für Versionsverwaltung
-def get_mapworld_version_info() -> Dict:
-    """Öffentliche Funktion zum Abrufen von Versionsinformationen"""
-    updater = MapWorldUpdater()
-    return updater.get_version_info()
-
-async def install_specific_version(device_ip: str, version_name: str = None) -> bool:
-    """Installiert eine spezifische Version auf einem Gerät"""
-    updater = MapWorldUpdater()
-    
-    if version_name:
-        # Suche nach spezifischer Version
-        versions = updater.get_all_apk_versions()
-        target_apk = None
-        
-        for apk_path, v_name, v_code in versions:
-            if v_name == version_name:
-                target_apk = apk_path
-                break
-        
-        if not target_apk:
-            logger.error(f"Version {version_name} not found")
-            return False
-        
-        # Temporär die APK als "current" setzen für Installation
-        current_apk = updater.get_current_apk_path()
-        if current_apk != target_apk:
-            # Backup current
-            backup_name = f"{current_apk.stem}_temp_backup{current_apk.suffix}"
-            backup_path = current_apk.parent / backup_name
-            if current_apk and current_apk.exists():
-                shutil.copy2(current_apk, backup_path)
-            
-            # Copy target to current position
-            temp_current = current_apk.parent / f"temp_current_{target_apk.name}"
-            shutil.copy2(target_apk, temp_current)
-            
-            try:
-                result = await updater.install_mapworld(device_ip)
-                
-                # Restore original current
-                if backup_path.exists():
-                    backup_path.replace(current_apk)
-                    backup_path.unlink(missing_ok=True)
-                
-                temp_current.unlink(missing_ok=True)
-                return result
-                
-            except Exception as e:
-                # Cleanup on error
-                temp_current.unlink(missing_ok=True)
-                if backup_path.exists():
-                    backup_path.replace(current_apk)
-                raise e
-    
-    # Install current version
-    return await updater.install_mapworld(device_ip)
-
 async def check_all_device_versions() -> Dict:
-    """Überprüft MapWorld-Versionen auf allen konfigurierten Geräten"""
+    """Checks MapWorld versions on all configured devices"""
     updater = MapWorldUpdater()
     config = load_config()
     devices = config.get("devices", [])
@@ -2855,7 +2921,67 @@ async def check_all_device_versions() -> Dict:
     }
     
     return summary
-    """Manuelle Bereinigung alter Versionen"""
+
+# Helper functions for version management
+def get_mapworld_version_info() -> Dict:
+    """Public function to retrieve version information"""
+    updater = MapWorldUpdater()
+    return updater.get_version_info()
+
+async def install_specific_version(device_ip: str, version_name: str = None) -> bool:
+    """Installs a specific version on a device"""
+    updater = MapWorldUpdater()
+    
+    if version_name:
+        # Search for specific version
+        versions = updater.get_all_apk_versions()
+        target_apk = None
+        
+        for apk_path, v_name, v_code in versions:
+            if v_name == version_name:
+                target_apk = apk_path
+                break
+        
+        if not target_apk:
+            logger.error(f"Version {version_name} not found")
+            return False
+        
+        # Temporarily set APK as "current" for installation
+        current_apk = updater.get_current_apk_path()
+        if current_apk != target_apk:
+            # Backup current
+            backup_name = f"{current_apk.stem}_temp_backup{current_apk.suffix}"
+            backup_path = current_apk.parent / backup_name
+            if current_apk and current_apk.exists():
+                shutil.copy2(current_apk, backup_path)
+            
+            # Copy target to current position
+            temp_current = current_apk.parent / f"temp_current_{target_apk.name}"
+            shutil.copy2(target_apk, temp_current)
+            
+            try:
+                result = await updater.install_mapworld(device_ip)
+                
+                # Restore original current
+                if backup_path.exists():
+                    backup_path.replace(current_apk)
+                    backup_path.unlink(missing_ok=True)
+                
+                temp_current.unlink(missing_ok=True)
+                return result
+                
+            except Exception as e:
+                # Cleanup on error
+                temp_current.unlink(missing_ok=True)
+                if backup_path.exists():
+                    backup_path.replace(current_apk)
+                raise e
+    
+    # Install current version
+    return await updater.install_mapworld(device_ip)
+
+def cleanup_mapworld_versions(keep_versions: int = None) -> int:
+    """Manual cleanup of old versions"""
     updater = MapWorldUpdater()
     
     if keep_versions is not None:
@@ -2875,6 +3001,175 @@ async def check_all_device_versions() -> Dict:
         if keep_versions is not None:
             updater.config.keep_previous_versions = original_keep
 
+def fix_apk_version(current_filename: str, correct_version: str) -> bool:
+    """Renames an APK file with the correct version"""
+    try:
+        updater = MapWorldUpdater()
+        current_path = updater.config.apk_dir / current_filename
+        
+        if not current_path.exists():
+            logger.error(f"File {current_filename} not found")
+            return False
+        
+        # Validate new version
+        if not updater._is_valid_version(correct_version):
+            logger.error(f"Invalid version format: {correct_version}")
+            return False
+        
+        # Create new filename
+        new_filename = updater.get_versioned_filename(correct_version, "0")
+        new_path = updater.config.apk_dir / new_filename
+        
+        if new_path.exists():
+            logger.warning(f"Target filename {new_filename} already exists")
+            return False
+        
+        # Rename
+        current_path.rename(new_path)
+        logger.info(f"Renamed {current_filename} → {new_filename}")
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error renaming APK: {e}")
+        return False
+
+async def force_download_with_version(version: str) -> bool:
+    """Downloads MapWorld and forces a specific version"""
+    try:
+        updater = MapWorldUpdater()
+        
+        logger.info(f"Force downloading MapWorld with version {version}")
+        success, apk_path = await updater.download_mapworld(force_version=version)
+        
+        if success and apk_path:
+            logger.info(f"Successfully downloaded and set version to {version}")
+            return True
+        else:
+            logger.error("Force download failed")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error during force download: {e}")
+        return False
+
+def debug_apk_version(filename: str = None) -> None:
+    """Debug function to find all versions in an APK"""
+    try:
+        updater = MapWorldUpdater()
+        
+        if filename:
+            apk_path = updater.config.apk_dir / filename
+        else:
+            apk_path = updater.get_current_apk_path()
+        
+        if not apk_path or not apk_path.exists():
+            print(f"APK file not found: {apk_path}")
+            return
+        
+        print(f"\n=== DEBUG: Analyzing {apk_path.name} ===")
+        
+        # Enable debug mode
+        version, code = updater.extract_apk_version(apk_path, debug=True)
+        
+        print(f"\nFinal result: {version} (code: {code})")
+        
+    except Exception as e:
+        print(f"Error during debug analysis: {e}")
+
+def quick_fix_version() -> bool:
+    """Quick repair of current version to 2.55"""
+    try:
+        updater = MapWorldUpdater()
+        current_apk = updater.get_current_apk_path()
+        
+        if not current_apk:
+            logger.error("No current APK found")
+            return False
+        
+        # Correct to probably right version
+        correct_version = "2.55"  # Adjustable based on current MapWorld version
+        
+        new_filename = updater.get_versioned_filename(correct_version, "0")
+        new_path = current_apk.parent / new_filename
+        
+        if new_path.exists():
+            logger.warning(f"Target file {new_filename} already exists, removing old file")
+            current_apk.unlink()
+        else:
+            current_apk.rename(new_path)
+        
+        logger.info(f"Fixed version: {current_apk.name} → {new_filename}")
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error fixing version: {e}")
+        return False
+
+async def redownload_with_correct_version(correct_version: str = "2.55") -> bool:
+    """Downloads MapWorld again and forces correct version"""
+    try:
+        updater = MapWorldUpdater()
+        backup_path = None
+        
+        # Backup current if exists
+        current_apk = updater.get_current_apk_path()
+        if current_apk:
+            backup_path = current_apk.with_suffix('.backup')
+            current_apk.rename(backup_path)
+            logger.info(f"Backed up current APK to {backup_path.name}")
+        
+        # Download with correct version
+        logger.info(f"Re-downloading MapWorld with correct version {correct_version}")
+        success, new_path = await updater.download_mapworld(force_version=correct_version)
+        
+        if success:
+            logger.info(f"Successfully re-downloaded with version {correct_version}")
+            
+            # Remove backup if successful
+            if backup_path and backup_path.exists():
+                backup_path.unlink()
+                logger.info("Removed backup file")
+            
+            return True
+        else:
+            logger.error("Re-download failed")
+            
+            # Restore backup
+            if backup_path and backup_path.exists():
+                backup_path.rename(current_apk)
+                logger.info("Restored backup file")
+            
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error during re-download: {e}")
+        return False
+
+def list_mapworld_versions() -> None:
+    """Shows all available MapWorld versions"""
+    try:
+        updater = MapWorldUpdater()
+        info = updater.get_version_info()
+        
+        print(f"\n=== MapWorld Versions ({info['total_versions']} total) ===")
+        
+        for i, version in enumerate(info['versions']):
+            status = " [CURRENT]" if version['is_current'] else ""
+            print(f"{i+1:2d}. {version['filename']}{status}")
+            print(f"    Version: {version['version_name']} (code: {version['version_code']})")
+            print(f"    Size: {version['size_mb']} MB")
+            print(f"    Modified: {version['modified']}")
+            print()
+        
+        if info['current_version']:
+            print(f"Current version: {info['current_version']['version_name']}")
+        else:
+            print("No current version found")
+            
+    except Exception as e:
+        print(f"Error listing versions: {e}")
+            
 # PIF Version Management Functions
 PIF_MODULE_DIR = BASE_DIR / "data" / "modules" / "playintegrityfork"
 PIFIX_MODULE_DIR = BASE_DIR / "data" / "modules" / "playintegrityfix"
